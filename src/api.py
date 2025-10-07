@@ -1,8 +1,19 @@
+# -*- coding: utf-8 -*-
+"""
+FastAPI app with:
+- /health, /stats                         (come prima)
+- /debug (HTML), /debug/frame, /debug/stream  (come prima)
+- /metrics/minute?last=N                  (NUOVO; se aggregator presente)
+- /config                                 (NUOVO; se config presente)
+"""
+from __future__ import annotations
+
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, StreamingResponse, Response
-from typing import Any
+from fastapi.responses import HTMLResponse, StreamingResponse, Response, JSONResponse
+from typing import Any, Optional, Callable
 from datetime import datetime, timezone
 import time
+
 
 def _uptime_sec(since_iso: str | None) -> int | None:
     if not since_iso:
@@ -14,8 +25,59 @@ def _uptime_sec(since_iso: str | None) -> int | None:
     except Exception:
         return None
 
+
+def _get_config_from_state(state) -> Optional[dict]:
+    """
+    Prova a leggere la config dallo state:
+    - metodo state.get_config() → dict o oggetto con .data
+    - chiave state["config"]
+    - attributo state.config
+    Restituisce un dict pronto per JSON o None.
+    """
+    try:
+        if hasattr(state, "get_config") and callable(getattr(state, "get_config")):
+            cfg = state.get_config()
+        elif isinstance(state, dict) and "config" in state:
+            cfg = state["config"]
+        elif hasattr(state, "config"):
+            cfg = getattr(state, "config")
+        else:
+            return None
+
+        if isinstance(cfg, dict):
+            return cfg
+        # oggetto con .data (es. Config dataclass)
+        data = getattr(cfg, "data", None)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+    return None
+
+
+def _get_aggregator_from_state(state):
+    """
+    Prova a ottenere l'aggregatore dallo state:
+    - metodo state.get_aggregator()
+    - chiave state["aggregator"]
+    - attributo state.aggregator
+    """
+    try:
+        if hasattr(state, "get_aggregator") and callable(getattr(state, "get_aggregator")):
+            return state.get_aggregator()
+        if isinstance(state, dict) and "aggregator" in state:
+            return state["aggregator"]
+        if hasattr(state, "aggregator"):
+            return getattr(state, "aggregator")
+    except Exception:
+        pass
+    return None
+
+
 def build_app(state) -> FastAPI:
     app = FastAPI(title="MyDisplay Vision", version="0.1.0")
+
+    # ---------------------- Endpoints "classici" ----------------------
 
     @app.get("/health")
     def health() -> dict[str, Any]:
@@ -113,7 +175,40 @@ def build_app(state) -> FastAPI:
                        b"Content-Type: image/jpeg\r\n"
                        b"Content-Length: " + str(len(jpg)).encode() + b"\r\n\r\n"
                        + jpg + b"\r\n")
-                time.sleep(1.0 / max(state.get_stream_fps(), 0.1))
+                # conserva lo stesso controllo FPS lato server
+                try:
+                    fps = max(state.get_stream_fps(), 0.1)
+                except Exception:
+                    fps = 5.0
+                time.sleep(1.0 / fps)
         return StreamingResponse(gen(), media_type=f"multipart/x-mixed-replace; boundary={boundary}")
+
+    # ---------------------- NUOVI Endpoints ----------------------
+
+    @app.get("/metrics/minute")
+    def metrics_minute(last: int = 10):
+        """
+        Ritorna gli ultimi N aggregati (se l'aggregatore è disponibile nello state).
+        Se non disponibile, restituisce [].
+        """
+        agg = _get_aggregator_from_state(state)
+        if agg and hasattr(agg, "get_last"):
+            try:
+                last_int = max(1, min(int(last), 500))
+            except Exception:
+                last_int = 10
+            return agg.get_last(last_int)
+        # fallback: niente aggregatore disponibile
+        return []
+
+    @app.get("/config")
+    def get_config():
+        """
+        Restituisce la configurazione attiva se disponibile nello state.
+        """
+        cfg = _get_config_from_state(state)
+        if cfg is None:
+            return JSONResponse({"error": "config not available"}, status_code=404)
+        return JSONResponse(cfg)
 
     return app

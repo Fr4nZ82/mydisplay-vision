@@ -1,7 +1,6 @@
 # MyDisplay Vision – Configurazione (guida completa)
 
 Questo documento elenca e spiega tutte le proprietà utilizzabili in config.json.  
-Nota: JSON non supporta commenti; tieni i commenti in un file di esempio (es. config.example.json) oppure nel README.
 
 - Indice
   - [🎥 Capture / Stream](#-capture--stream)
@@ -35,207 +34,201 @@ Nota: JSON non supporta commenti; tieni i commenti in un file di esempio (es. co
 
 Ambito: impostazioni di acquisizione e stream di debug (dimensioni, fps, overlay).
 
-- camera: indice della webcam (0 predefinito) oppure stringa RTSP.
-- width, height: risoluzione richiesta alla camera (pixel).
-- target_fps: FPS desiderati per l’elaborazione (throttle del loop).
-- debug_enabled: abilita la pagina /debug e lo stream MJPEG.
-- debug_stream_fps: frequenza dei frame nello stream MJPEG (non influenza il loop).
-- debug_resize_width: larghezza per lo stream di debug, mantenendo aspect ratio (0 = nessun resize).
+- camera (default: 0): indice webcam o stringa RTSP.
+- width (default: 1920), height (default: 1080): risoluzione richiesta (px).
+- target_fps (default: 10.0): FPS desiderati per il loop (throttle).
+- debug_enabled (default: true): abilita /debug e stream MJPEG.
+- debug_stream_fps (default: 5): FPS dello stream MJPEG.
+- debug_resize_width (default: 960): larghezza frame per /debug; 0=nessun resize.
 
 
 ## 🌐 API
 
 Ambito: server HTTP locale per diagnostica, stream e metriche.
 
-- api_host: indirizzo bind (es. "127.0.0.1" o "0.0.0.0").
-- api_port: porta del server (es. 8080).
+- api_host (default: "127.0.0.1"): bind address (usa "0.0.0.0" per LAN).
+- api_port (default: 8080): porta del server.
 
 
 ## 📡 RTSP (sorgenti IP)
 
-Ambito: tuning best‑effort per flussi RTSP letti da OpenCV/FFmpeg.
+Ambito: tuning best‑effort per flussi RTSP con OpenCV/FFmpeg.
 
-- rtsp_transport: "tcp" o "udp" (default tcp).
-- rtsp_buffer_frames: dimensione buffer interno (frame).
-- rtsp_open_timeout_ms: timeout di apertura (millisecondi).
-- rtsp_read_timeout_ms: timeout di lettura (millisecondi).
-- rtsp_reconnect_sec: attesa prima di riaprire dopo errori.
-- rtsp_max_failures: quante read fallite prima di tentare un reopen.
+- rtsp_transport (default: "tcp"): "tcp" o "udp".
+- rtsp_buffer_frames (default: 2): dimensione buffer interno (frame).
+- rtsp_open_timeout_ms (default: 4000): timeout apertura (ms).
+- rtsp_read_timeout_ms (default: 4000): timeout lettura (ms).
+- rtsp_reconnect_sec (default: 2.0): attesa prima del reopen.
+- rtsp_max_failures (default: 60): read fallite prima di riaprire.
 
 
 ## 🧭 Tracker (ID stabili)
 
-Ambito: mantenere un ID coerente per persona/volto nei frame consecutivi (SORT‑lite).
+Ambito: mantenere un ID coerente per persona/volto tra frame consecutivi (SORT‑lite).
 
-- tracker_max_age: quanti frame tollerare senza update prima di eliminare il track.
-- tracker_min_hits: frammenti minimi per considerare “valido” un track (filtra falsi positivi).
-- tracker_iou_th: soglia IoU per associare una detection al track esistente (0.3–0.4 tipico).
+- tracker_max_age (default: 15): frame tollerati senza update.
+- tracker_min_hits (default: 2): hit minimi per attivare un track.
+- tracker_iou_th (default: 0.35): soglia IoU per matching.
 
 
 ## 🔎 Detector
 
 ### Person detector (YOLO ONNX)
 
-Ambito: detection “primaria” delle persone. Se configurato, il tracker usa queste bbox; altrimenti fa fallback ai volti.
+Ambito: detection primaria delle persone. Se presente, il tracker usa queste bbox; altrimenti fallback sui volti.
 
-- person_model_path: percorso del modello ONNX (es. models/yolov8n.onnx). Vuoto = disattivato.
-- person_img_size: lato dell’input (es. 640).
-- person_score_th: soglia confidenza minima.
-- person_iou_th: soglia IoU per NMS interno.
-- person_max_det: numero massimo di detection in output.
-- person_backend, person_target: backend/target per OpenCV DNN.
+- person_model_path (default: ""): path ONNX (vuoto = disattivato).
+- person_img_size (default: 640): lato input del modello.
+- person_score_th (default: 0.35): soglia confidenza minima.
+- person_iou_th (default: 0.45): soglia IoU per NMS.
+- person_max_det (default: 200): massimo numero di box in output.
+- person_backend (default: 0), person_target (default: 0): backend/target DNN.
 
 ### Face detector (YuNet)
 
-Ambito: detection volti per età/genere e per ancorare il ReID via face embedding.
+Ambito: detection volti per età/genere e ancoraggio ReID via embedding facciale.
 
-- detector_model: percorso ONNX di YuNet (es. models/face_detection_yunet_2023mar.onnx).
-- detector_score_th: soglia confidenza minima.
-- detector_nms_iou: soglia NMS (IoU).
-- detector_top_k: massimo numero di box processati.
-- detector_backend, detector_target: backend/target OpenCV DNN.
-- detector_resize_width: ridimensiona solo per il face detector (accelera senza toccare lo stream di debug).
-- Compat: se nel JSON è presente un blocco "yunet": { onnx_path, score_th, nms_th, top_k }, viene mappato automaticamente sui detector_* se non già impostati.
+- detector_model (default: "models/face_detection_yunet_2023mar.onnx").
+- detector_score_th (default: 0.8).
+- detector_nms_iou (default: 0.3).
+- detector_top_k (default: 5000).
+- detector_backend (default: 0), detector_target (default: 0).
+- detector_resize_width (default: 640): resize solo per detection.
+- Compat: blocco opzionale "yunet": { onnx_path, score_th, nms_th, top_k } viene mappato su detector_* se non impostati.
 
 ### Associazione volto→persona
 
-Ambito: collegare un volto alla bbox persona più plausibile per usare volto nel classifier e nel ReID.
+Ambito: collegare un volto alla bbox persona più plausibile per usare volto nel classifier/ReID.
 
-- face_assoc_iou_th: IoU minima per associare volto→persona (0.2 tipico).
-- face_assoc_center_in: se true, accetta anche “centro volto dentro bbox persona” come criterio.
+- face_assoc_iou_th (default: 0.20): IoU minima per associare volto→persona.
+- face_assoc_center_in (default: true): consente criterio “centro volto dentro bbox persona”.
 
 
 ## 🧠 Classificatore Età/Genere
 
-Ambito: stima genere ed età da crop volto, via ONNX Runtime.
+Ambito: stima genere/età da crop volto via ONNX Runtime.
 
-- age_model_path, gender_model_path: modelli separati (fallback se non c’è il combinato).
-- age_buckets: etichette delle fasce d’età (devono allinearsi a report/metriche).
-- cls_min_face_px: lato minimo del volto per tentare la classificazione (evita input troppo piccoli).
-- cls_min_conf: confidenza minima per genere (sotto soglia → "unknown").
-- cls_interval_ms: intervallo minimo tra inferenze sullo stesso track (cache/throttle).
+- age_model_path (default: "models/age.onnx"), gender_model_path (default: "models/gender.onnx").
+- age_buckets (default: ["0-13","14-24","25-34","35-44","45-54","55-64","65+"]).
+- cls_min_face_px (default: 64): lato minimo volto per inferenza.
+- cls_min_conf (default: 0.35): soglia confidenza genere.
+- cls_interval_ms (default: 300): throttle per track.
 
 ### Modello combinato (consigliato)
 
-Ambito: un solo ONNX che predice età e genere insieme (più veloce).
+Ambito: un solo ONNX che predice età+genere.
 
-- combined_model_path: percorso del modello combinato (es. Intel age-gender-recognition-retail-0013.onnx, InsightFace genderage.onnx). Se presente, ha priorità.
-- combined_input_size: dimensione input (es. [62,62] Intel, [96,96] InsightFace).
-- combined_bgr_input: true se il modello attende BGR (tipico Intel/InsightFace), false per RGB.
-- combined_scale01: scala a [0..1] se necessario (Intel solitamente lavora 0..255 → false).
-- combined_age_scale: fattore per riportare l’età da output normalizzato (es. ×100).
-- combined_gender_order: ordine classi nella predizione di genere (es. ["female","male"]).
+- combined_model_path (default: "models/age-gender-recognition-retail-0013.onnx").
+- combined_input_size (default: [62,62]).
+- combined_bgr_input (default: true).
+- combined_scale01 (default: false).
+- combined_age_scale (default: 100.0).
+- combined_gender_order (default: ["female","male"]).
 
 ### Throttle / caching classificazione
 
 Ambito: prestazioni e stabilità label.
 
-- Il sistema memorizza l’ultimo risultato per track e lo riutilizza fino a cls_interval_ms.
-- Il tracker applica smoothing (finestra + EMA) per ridurre fluttuazioni.
+- I risultati sono memorizzati per track e riutilizzati fino a cls_interval_ms; lo smoothing del tracker riduce fluttuazioni.
 
 
 ## 🚶 ROI / Tripwire
 
-Ambito: conteggio direzionale di attraversamenti su una linea virtuale normalizzata.
+Ambito: conteggio direzionale di attraversamenti su linea virtuale normalizzata.
 
-- roi_tripwire: due punti normalizzati [[x1,y1],[x2,y2]] (0..1 rispetto a frame) che definiscono la linea A→B.
-- roi_direction: "both" | "a2b" | "b2a" (filtra la direzione valida).
-- roi_band_px: spessore (pixel) della banda di tolleranza attorno alla linea.
+- roi_tripwire (default: [[0.1,0.5],[0.9,0.5]]): punti normalizzati A→B.
+- roi_direction (default: "both"): direzione valida (both|a2b|b2a).
+- roi_band_px (default: 12): spessore banda di tolleranza (px).
 
-Funzionamento: il sistema registra un evento quando il centro del box (persona/volto) attraversa la tripwire; l’aggregatore trasforma eventi in metriche per finestra temporale.
+Funzionamento: registra un evento quando il centro del box attraversa la tripwire; l’aggregatore crea metriche per finestra temporale.
 
 
 ## 🔁 Re-Identification (ReID)
 
 ### Obiettivi e panoramica
 
-Ambito: riassociare la stessa persona su uscite/rientri entro un TTL, anche senza volto visibile; ridurre duplicazioni e conteggi spuri.
+Ambito: riassociare la stessa persona su uscite/rientri entro TTL; ridurre duplicati e conteggi spuri.
 
-La pipeline usa:
-- Face ReID (embedding del volto) quando disponibile;
-- Body ReID (embedding corpo) per agganciare persone senza volto;
-- Firma di aspetto legacy (istogramma colore) come prior debole.
-Una politica di fusione e soglie decide l’ID più plausibile.
+La pipeline usa embedding di volto e corpo, più una firma di aspetto (colore) come prior debole. Una policy di soglie/fusione assegna l’ID più plausibile.
 
 ### Face ReID (SFace/ArcFace)
 
-- reid_enabled: abilita/disabilita il ReID.
-- reid_model_path: modello SFace (OpenCV contrib) o ArcFace ONNX.
-- reid_similarity_th: soglia di similarità (cosine) per match volto (0.35–0.40 tipico SFace).
-- reid_face_gate: soglia minima per considerare affidabile il volto (gate interno).
-- reid_require_face_if_available: se true, preferisce match verso ID già ancorati da un volto.
-- reid_bank_size: numero max di embedding conservati per ID (banca rotante).
-- reid_merge_sim: soglia per fondere alias molto simili (se supportato).
-- reid_prefer_oldest: tie‑break verso l’ID più “anziano”.
+- reid_enabled (default: true): abilita ReID volto.
+- reid_model_path (default: "models/face_recognition_sface_2021dec.onnx").
+- reid_similarity_th (default: 0.365): soglia match volto.
+- reid_face_gate (default: 0.42): gate minimo per considerare affidabile il volto.
+- reid_require_face_if_available (default: true): preferisci ID già ancorati da volto.
+- reid_cache_size (default: 1000): dimensione cache ID.
+- reid_memory_ttl_sec (default: 600): TTL memoria (eviction/presence).
+- reid_bank_size (default: 10): max feature per banca/ID.
+- reid_merge_sim (default: 0.55): soglia merge alias simili.
+- reid_prefer_oldest (default: true): tie‑break verso ID più vecchio.
+- reid_app_only_th (default: 0.65): soglia severa per match “solo aspetto”.
 
 ### Body ReID (OSNet / Intel OMZ)
 
-- body_reid_model_path: percorso modello corpo (es. models/osnet_x0_25_msmt17.onnx o person-reidentification-retail-0288.onnx). Vuoto = disattivato.
-- body_reid_input_w, body_reid_input_h: dimensione input modello corpo (tipicamente 128x256 W×H).
-- body_reid_backend, body_reid_target: backend/target DNN per OpenCV.
-- body_only_th: soglia per match “solo corpo” (alza a 0.82–0.85 per essere conservativo).
-- reid_allow_body_seed: consenti creare un nuovo ID “ancorato” inizialmente solo sul corpo (utile quando non si vedono volti).
+- body_reid_model_path (default: ""): path modello corpo (vuoto = disattivo).
+- body_reid_input_w (default: 128), body_reid_input_h (default: 256): input W×H.
+- body_reid_backend (default: 0), body_reid_target (default: 0): backend/target DNN.
+- body_only_th (default: 0.80): soglia match solo-corpo.
+- reid_allow_body_seed (default: true): consenti creare ID con sola feature corpo quando nessun match è affidabile.
 
 ### Firma di aspetto legacy (colore vestiti)
 
-- appearance_hist_bins: bins istogramma HSV (maggiore = più fine).
-- appearance_min_area_px: area minima crop per calcolare la firma.
-- appearance_weight: peso della firma nel calcolo di prior (usata nella fusione come segnale debole).
-- reid_app_only_th: soglia severa per match “solo aspetto” (usare con prudenza).
+- appearance_hist_bins (default: 24): bins istogramma HSV.
+- appearance_min_area_px (default: 900): area minima del crop per calcolo firma.
+- appearance_weight (default: 0.35): peso nella fusione (prior debole).
 
 ### Politiche di fusione e soglie
 
 Priorità: volto > corpo > aspetto.  
 - Se face_sim ≥ reid_similarity_th → match per volto.
-- Altrimenti, se body_sim ≥ body_only_th → match per corpo (con gate verso ID ancorati al volto se reid_require_face_if_available = true).
-- In alternativa, aspetto legacy se ≥ reid_app_only_th (più severo).
-- Nessun match → nuovo ID; se reid_allow_body_seed = true, viene “seminata” anche la banca corpo.
+- Altrimenti se body_sim ≥ body_only_th → match per corpo (con gate verso ID con volto se reid_require_face_if_available = true).
+- In alternativa, aspetto se ≥ reid_app_only_th (prudenza).
+- Nessun match → nuovo ID; se reid_allow_body_seed = true, semina banca corpo.
 
 ### Memoria, TTL e banca di feature
 
-- reid_cache_size: massimo numero di ID memorizzati.
-- reid_memory_ttl_sec: durata della memoria ReID; scaduto il TTL, l’ID viene “evicted” (in modalità presence questo genera il conteggio).
-- reid_bank_size: numero max di feature per ogni banca (face/body/app) per ID.
+- reid_cache_size (default: 1000), reid_memory_ttl_sec (default: 600), reid_bank_size (default: 10): controllo memoria/TTL e rotazione feature per ID.
 
 ### Diagnostica ReID
 
-- debug_reid_verbose: se true, stampa decisioni di assegnazione (ID scelto, similitudini face/body/app, top‑3 candidati). Utile per tuning delle soglie in campo.
+- debug_reid_verbose (default: false): stampa decisioni (ID scelto, face/body/app, top‑3).
 
 
 ## 🧮 Modalità di conteggio e deduplica
 
-Ambito: come generare eventi da trasformare in metriche.
+Ambito: generazione eventi per metriche.
 
-- count_mode: "presence" | "tripwire"
-  - presence: il conteggio avviene alla “scadenza” (eviction) della presenza in memoria (TTL), associando genere/età prevalenti osservati.
-  - tripwire: il conteggio avviene al passaggio oltre la linea A→B/B→A, opzionalmente con direzione filtrata.
-- presence_ttl_sec: TTL di presenza (usato in modalità presence).
-- count_dedup_ttl_sec: intervallo minimo prima di poter ricontare la stessa persona (dedup), in modalità tripwire.
+- count_mode (default: "presence"): "presence" | "tripwire".
+  - presence: conteggio all’eviction (TTL) con genere/età prevalenti osservati.
+  - tripwire: conteggio al passaggio oltre la linea A→B/B→A.
+- presence_ttl_sec (default: 600): TTL presenza (usato in presence).
+- count_dedup_ttl_sec (default: 600): dedup per stessa persona in tripwire.
 
 
 ## 📊 Metriche / Aggregazione
 
-Ambito: raccolta eventi su finestre temporali regolari per reporting.
+Ambito: raccolta eventi su finestre temporali per reporting.
 
-Ogni evento (presence o tripwire) viene passato al MinuteAggregator, che mantiene finestre e retention.
+- metrics_window_sec (default: 60): durata finestra (s).
+- metrics_retention_min (default: 120): retention dati (minuti).
 
-- metrics_window_sec: durata finestra (secondi). Es. 60 = per minuto.
-- metrics_retention_min: retention (minuti) dei record aggregati (in memoria).
-- Output per finestra: counts per sesso (male/female/unknown) e per fascia d’età (0‑13 … 65+ / unknown), ts ISO e windowSec.
+Output per finestra: counts per sesso (male/female/unknown) e per fascia d’età (0‑13 … 65+ / unknown), con ts ISO e windowSec.
 
 
 ## ⚙️ Suggerimenti di performance
 
-- Riduci detector_resize_width (face) a 480–640 per accelerare la detection mantenendo stabilità.
+- Riduci detector_resize_width (face) a 480–640 per accelerare la detection.
 - Aumenta cls_interval_ms per ridurre inferenze ripetute sullo stesso volto.
-- Scegli tracker_iou_th ~ 0.3–0.4 per buon compromesso tra stabilità e distinzione persone vicine.
-- In ReID, aumenta body_only_th (0.82+) in ambienti con abbigliamento simile per ridurre merge falsi.
-- RTSP: regola rtsp_* secondo la stabilità della rete/camera; riduci person_img_size per ridurre latenza.
+- tracker_iou_th ~ 0.3–0.4 è un buon compromesso.
+- In ReID, aumenta body_only_th (0.82+) in contesti con abbigliamento simile.
+- Per RTSP instabile, regola rtsp_* (timeout/buffer) e valuta tcp vs udp.
 
 
 ## 🧪 Troubleshooting
 
-- “Non posso commentare JSON”: lo standard JSON non supporta commenti; tieni i commenti in file separati o usa un parser dedicato se vuoi supportarli.
-- Età/genere sempre unknown: verifica combined_model_path o modelli separati; alza cls_min_face_px se i volti sono troppo piccoli; controlla luminosità.
-- ReID “collassa” su un solo ID: alza body_only_th (es. 0.85), reid_similarity_th (se serve), mantieni reid_require_face_if_available = true.
-- RTSP instabile: aumenta rtsp_open_timeout_ms/read_timeout_ms e rtsp_reconnect_sec; verifica banda; valuta tcp vs udp.
+- JSON non supporta commenti: non usare // o /* */ in config.json.
+- Età/genere sempre unknown: verifica combined_model_path o modelli separati; controlla cls_min_face_px e illuminazione.
+- ReID che collassa su un unico ID: alza body_only_th (es. 0.85), mantieni reid_require_face_if_available=true, calibra reid_similarity_th.
+- RTSP instabile: alza timeout/buffer, riduci person_img_size, verifica rete.

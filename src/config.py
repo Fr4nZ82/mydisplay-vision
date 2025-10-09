@@ -24,7 +24,7 @@ _DEFAULTS: Dict[str, Any] = {
     "height": 1080,
     "target_fps": 10.0,
 
-    "debug_enabled": True,
+    "debug_enabled": False,
     "debug_stream_fps": 5,
     "debug_resize_width": 960,  # 0 = nessun resize, 960 consigliato per /debug
 
@@ -87,8 +87,8 @@ _DEFAULTS: Dict[str, Any] = {
     "combined_gender_order": ["female", "male"],
 
     # --- Tracker ---
-    "tracker_max_age": 12,
-    "tracker_min_hits": 3,
+    "tracker_max_age": 8,
+    "tracker_min_hits": 4,
     "tracker_iou_th": 0.35,
 
     # --- ROI / Tripwire ---

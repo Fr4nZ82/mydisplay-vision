@@ -93,8 +93,8 @@ def run_pipeline(state: HealthState, cfg) -> None:
 
     # Tracker
     tracker = SortLiteTracker(
-        max_age=int(getattr(cfg, "tracker_max_age", 12)),
-        min_hits=int(getattr(cfg, "tracker_min_hits", 3)),
+        max_age=int(getattr(cfg, "tracker_max_age", 8)),
+        min_hits=int(getattr(cfg, "tracker_min_hits", 4)),
         iou_th=float(getattr(cfg, "tracker_iou_th", 0.35)),
         smooth_win=8,
         smooth_alpha=0.5,

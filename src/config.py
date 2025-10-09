@@ -105,9 +105,21 @@ _DEFAULTS: Dict[str, Any] = {
     "reid_bank_size": 10,          # NUM descrittori per ID (feature bank)
     "reid_merge_sim": 0.55,        # se un nuovo embedding è così simile a un ID esistente → alias merge
     "reid_prefer_oldest": True,    # in caso di dubbio, tieni l'ID più vecchio
-    "reid_app_only_th": 0.65,
+    "reid_app_only_th": 0.65,      # già usata nel runtime via set_id_policy (app_only_min_th alias)
     "reid_face_gate": 0.42,
     "reid_require_face_if_available": True,
+
+    # --- Body ReID (NUOVO) ---
+    "body_reid_model_path": "",
+    "body_reid_input_w": 128,
+    "body_reid_input_h": 256,
+    "body_reid_backend": 0,
+    "body_reid_target": 0,
+    "body_only_th": 0.80,
+    "reid_allow_body_seed": True,
+
+    # --- Debug / Verbose ---
+    "debug_reid_verbose": False,
 
     # --- Dedup conteggi (non riconteggiare stessa persona entro questo TTL) ---
     "count_dedup_ttl_sec": 600,
@@ -157,3 +169,4 @@ class AppConfig:
         if hasattr(self, "yunet"):
             out["yunet"] = getattr(self, "yunet")
         return out
+

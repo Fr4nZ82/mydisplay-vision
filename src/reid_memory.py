@@ -11,6 +11,10 @@ Uso:
     reid = FaceReID(model_path="models/arcfaceresnet100-8.onnx", similarity_th=0.36, cache_size=1000, memory_ttl_sec=600)
     gid = reid.assign_global_id(face_crop_bgr, kps5=None)  # kps5 opzionale (usato solo per SFace)
     reid.touch(gid)
+
+Opzionale:
+    - Backend corpo: reid.set_body_backend(backend) dove backend.embed(bgr)->np.ndarray
+    - Passare body_bgr_crop a assign_global_id(...) per usare il re-id del corpo
 """
 from __future__ import annotations
 
@@ -71,6 +75,7 @@ def _appearance_signature(bgr: np.ndarray, bins: int = 24, min_area_px: int = 90
     # add simple geometric cues: aspect ratio and relative area (bounded)
     ar = np.array([w / (h + 1e-6), (h * w) / 1e6], dtype=np.float32)  # scale area roughly
     return _l2_normalize(np.concatenate([hist, ar], axis=0))
+
 class _BackendSFace:
     """
     Backend SFace basato su OpenCV contrib (FaceRecognizerSF).
@@ -177,9 +182,12 @@ class FaceReID:
         self.next_global_id = 1
         # global_id -> {
         #   'feats': [face_embed,...],
-        #   'app': [appearance_sig,...],          # NEW
+
+        #   'app': [appearance_sig,...],
+        #   'body': [body_embed,...],            # NEW
         #   'last': ts, 'created': ts, 'hits': int,
-        #   'meta': {'gender_hist': Counter, 'age_hist': Counter}  # NEW
+
+        #   'meta': {'gender_hist': Counter, 'age_hist': Counter}
         # }
         self.mem: "OrderedDict[int, Dict[str, Any]]" = OrderedDict()
         # alias map: nuovo_id -> id_canonico (vecchio)
@@ -206,6 +214,12 @@ class FaceReID:
             self.backend = None
             self.enabled = False
             self.backend_name = "disabled"
+
+        # ---- NEW: body re-id backend + policy ----
+        self.body_backend = None     # oggetto con .embed(bgr)->vec
+        self.body_only_th = 0.80     # soglia per matching solo-corpo
+        self.allow_body_seed = True  # consente creare ID con solo corpo
+        self.debug = False           # stampa decisioni di assegnazione se True
 
     # ----------------- memoria & utilità -----------------
 
@@ -234,7 +248,8 @@ class FaceReID:
         if not info:
             return -1.0
         feats = info['feats']
-        if not feats:
+
+        if not feats or feat is None:
             return -1.0
         return max(float(np.dot(f, feat) / ((np.linalg.norm(f)+1e-9)*(np.linalg.norm(feat)+1e-9))) for f in feats)
 
@@ -289,7 +304,9 @@ class FaceReID:
             self.app_th = float(app_th)
 
 
-    def set_id_policy(self, appearance_weight=None, app_only_min_th=None, require_face_if_available=None, face_gate=None):
+
+    def set_id_policy(self, appearance_weight=None, app_only_min_th=None, require_face_if_available=None, face_gate=None,
+                      body_only_th=None, allow_body_seed=None):
         if appearance_weight is not None:
             self.appearance_weight = float(appearance_weight)
         if app_only_min_th is not None:
@@ -298,114 +315,160 @@ class FaceReID:
             self.require_face_if_available = bool(require_face_if_available)
         if face_gate is not None:
             self.face_gate = float(face_gate)
+        if body_only_th is not None:
+            self.body_only_th = float(body_only_th)
+        if allow_body_seed is not None:
+            self.allow_body_seed = bool(allow_body_seed)
 
-    # ----------------- API principale -----------------
 
-    def assign_global_id(self, face_bgr_crop: Optional[np.ndarray], kps5: Optional[np.ndarray] = None, now_ts: Optional[float] = None, appearance_bgr_crop: Optional[np.ndarray] = None) -> int:
-        now = time.time() if now_ts is None else now_ts
-        self._prune(now)
 
-        # 1) estrai embedding volto (se possibile)
-        feat = None
-        if self.enabled and self.backend is not None and face_bgr_crop is not None:
-            face_for_feat = None
-            if self.backend_name == "sface" and kps5 is not None:
-                try:
-                    face_for_feat = _warp_face_bgr(face_bgr_crop, np.asarray(kps5, dtype=np.float32), (112,112))
-                except Exception:
-                    face_for_feat = None
-            if face_for_feat is None:
-                face_for_feat = face_bgr_crop
-            feat = self.backend.feat(face_for_feat)
 
-        # 2) firma di aspetto (vestiti)
-        app_sig = None
-        if appearance_bgr_crop is not None:
-            app_sig = _appearance_signature(
-                appearance_bgr_crop,
-                bins=self.appearance_bins,
-                min_area_px=self.appearance_min_area_px
-            )
 
-        # 3) nessun segnale → nuovo ID
-        if feat is None and app_sig is None:
-            gid = self.next_global_id
-            self.next_global_id += 1
-            self.mem[gid] = {'feats': [], 'app': [], 'last': now, 'created': now, 'hits': 1,
-                            'meta': {'gender_hist': {}, 'age_hist': {}}}
-            return gid
 
-        # ---------- BRANCH A: con volto ----------
-        if feat is not None:
-            # best per volto (solo similitudini di volto)
-            best_id, best_sim, second = self._best_match(feat)
-            if best_id is not None and best_sim >= self.sim_th:
-                # assegna al best volto; aggiungi banche
-                pid = self.canon(best_id)
-                self._add_feat(pid, feat, now)
-                if app_sig is not None:
-                    self._add_app(pid, app_sig, now)
-                return pid
 
-            # volto sotto soglia → fallback su aspetto SOLO verso ID già ancorati dal volto
-            if app_sig is not None:
-                best_app_id, best_app_sim = None, -1.0
-                for pid in self.mem.keys():
-                    # Se la policy è attiva, ignora ID che NON hanno mai avuto volto (evita "colla" corpo↔corpo)
-                    if self.require_face_if_available and len(self.mem[pid].get('feats', [])) == 0:
-                        continue
-                    s_app = self._sim_to_pid_app(pid, app_sig)
-                    if s_app > best_app_sim:
-                        best_app_id, best_app_sim = pid, s_app
-                if best_app_id is not None and best_app_sim >= self.app_only_min_th:
-                    pid = self.canon(best_app_id)
-                    # ora ancoriamo: aggiungo anche la faccia a questo ID
-                    self._add_feat(pid, feat, now)
-                    self._add_app(pid, app_sig, now)
-                    return pid
 
-            # nessun match valido → nuovo ID
-            new_id = self.next_global_id
-            self.next_global_id += 1
-            self.mem[new_id] = {'feats': [], 'app': [], 'last': now, 'created': now, 'hits': 1,
-                                'meta': {'gender_hist': {}, 'age_hist': {}}}
-            self._add_feat(new_id, feat, now)
-            if app_sig is not None:
-                self._add_app(new_id, app_sig, now)
-            return new_id
 
-        # ---------- BRANCH B: solo aspetto ----------
-        else:
-            best_app_id, best_app_sim = None, -1.0
-            for pid in self.mem.keys():
-                # SOLO match verso ID già ancorati dal volto (evita unioni corpo↔corpo)
-                if self.require_face_if_available and len(self.mem[pid].get('feats', [])) == 0:
-                    continue
-                s_app = self._sim_to_pid_app(pid, app_sig)
-                if s_app > best_app_sim:
-                    best_app_id, best_app_sim = pid, s_app
 
-            if best_app_id is not None and best_app_sim >= self.app_only_min_th:
-                pid = self.canon(best_app_id)
-                self._add_app(pid, app_sig, now)
-                return pid
 
-            # altrimenti crea nuovo (ID nato da SOLO-corpo → NON aggiungo firma d'aspetto ora)
-            new_id = self.next_global_id
-            self.next_global_id += 1
-            self.mem[new_id] = {'feats': [], 'app': [], 'last': now, 'created': now, 'hits': 1,
-                                'meta': {'gender_hist': {}, 'age_hist': {}}}
-            # niente self._add_app(new_id, app_sig, now) qui: attendo di ancorarlo col volto
-            return new_id
 
-    def touch(self, global_id: int, now_ts: Optional[float] = None):
-        now = time.time() if now_ts is None else now_ts
-        pid = self.canon(global_id)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    # --- NEW: setter backend/body + debug ---
+    def set_body_backend(self, backend) -> None:
+        """backend: oggetto con metodo embed(person_bgr)->np.ndarray|None"""
+        self.body_backend = backend
+
+    def set_debug(self, verbose: bool) -> None:
+        self.debug = bool(verbose)
+
+    # --- NEW: banca corpo e similarità ---
+    def _add_body(self, pid: int, vec: np.ndarray, now: float):
         info = self.mem.get(pid)
-        if info:
-            info['last'] = now
-            self.mem[pid] = info
 
+
+
+
+
+
+
+        if not info:
+            return
+
+
+        bank = info.setdefault('body', [])
+        bank.append(np.asarray(vec, dtype=np.float32))
+        if len(bank) > self.bank_size:
+            bank.pop(0)
+        info['last'] = now
+        info['hits'] += 1
+        self.mem[pid] = info
+
+
+    def _sim_to_pid_body(self, pid: int, vec: np.ndarray) -> float:
+        info = self.mem.get(pid)
+        if not info:
+            return -1.0
+
+
+        bank = info.get('body', [])
+        if not bank or vec is None:
+            return -1.0
+
+        return max(_cosine_sim(b, vec) for b in bank)
+
+
+
+
+    # --- banca aspetto (già presente) ---
     def _add_app(self, pid: int, app_sig: np.ndarray, now: float):
         info = self.mem.get(pid)
         if not info:
@@ -426,6 +489,160 @@ class FaceReID:
         if not bank:
             return -1.0
         return max(_cosine_sim(f, sig) for f in bank)
+
+    # --- NEW: fusione ranking (rispetta soglie finali) ---
+    @staticmethod
+    def _fuse(face_sim: float, body_sim: float, app_sim: float) -> float:
+        parts = []
+        if face_sim is not None and face_sim >= 0.0:
+            parts.append((float(face_sim), 1.0))
+        if body_sim is not None and body_sim >= 0.0:
+            parts.append((float(body_sim), 0.7))
+        if app_sim is not None and app_sim >= 0.0:
+            parts.append((float(app_sim), 0.3))
+        if not parts:
+            return -1.0
+        num = sum(s * w for s, w in parts)
+        den = sum(w for _, w in parts)
+        return float(num / (den + 1e-9))
+
+    # ----------------- API principale -----------------
+    def assign_global_id(self,
+                         face_bgr_crop: Optional[np.ndarray],
+                         kps5: Optional[np.ndarray] = None,
+                         now_ts: Optional[float] = None,
+                         appearance_bgr_crop: Optional[np.ndarray] = None,
+                         body_bgr_crop: Optional[np.ndarray] = None) -> int:
+        now = time.time() if now_ts is None else now_ts
+        self._prune(now)
+
+        # 1) embedding volto (se disponibile)
+        feat = None
+        if self.enabled and self.backend is not None and face_bgr_crop is not None:
+            face_for_feat = None
+            if self.backend_name == "sface" and kps5 is not None:
+                try:
+                    face_for_feat = _warp_face_bgr(face_bgr_crop, np.asarray(kps5, dtype=np.float32), (112,112))
+                except Exception:
+                    face_for_feat = None
+            if face_for_feat is None:
+                face_for_feat = face_bgr_crop
+            feat = self.backend.feat(face_for_feat)
+
+        # 2) embedding corpo (se backend presente + crop valido)
+        body_vec = None
+        if self.body_backend is not None and body_bgr_crop is not None:
+            try:
+                body_vec = self.body_backend.embed(body_bgr_crop)
+                if body_vec is not None:
+                    body_vec = _l2_normalize(np.asarray(body_vec, dtype=np.float32))
+            except Exception:
+                body_vec = None
+
+        # 3) firma aspetto legacy (colore vestiti)
+        app_sig = None
+        if appearance_bgr_crop is not None:
+            app_sig = _appearance_signature(
+                appearance_bgr_crop,
+                bins=self.appearance_bins,
+                min_area_px=self.appearance_min_area_px
+            )
+
+        # Nessun segnale → nuovo ID
+        if feat is None and body_vec is None and app_sig is None:
+            gid = self.next_global_id
+            self.next_global_id += 1
+            self.mem[gid] = {'feats': [], 'app': [], 'body': [], 'last': now, 'created': now, 'hits': 1,
+                             'meta': {'gender_hist': {}, 'age_hist': {}}}
+            if self.debug:
+                print(f"[ReID] new id(no signals) -> G{gid}")
+            return gid
+
+        # Costruisci candidati con similarità disponibili
+        def _id_has_face(pid: int) -> bool:
+            info = self.mem.get(pid)
+            return bool(info and len(info.get('feats', [])) > 0)
+
+        # Precalcola sim per ranking/debug
+        cand = []
+        for pid in self.mem.keys():
+            fs = self._sim_to_pid(pid, feat) if feat is not None else -1.0
+            bs = self._sim_to_pid_body(pid, body_vec) if body_vec is not None else -1.0
+            asim = self._sim_to_pid_app(pid, app_sig) if app_sig is not None else -1.0
+            fused = self._fuse(fs, bs, asim)
+            cand.append((pid, fs, bs, asim, fused))
+        cand.sort(key=lambda r: r[4], reverse=True)
+
+        # ------------- Decisioni -------------
+        chosen = None
+        reason = "new"
+
+        # A) Se c'è volto e supera soglia → match per volto
+        if feat is not None:
+            best_face = max(cand, key=lambda r: r[1]) if cand else None
+            if best_face and best_face[1] >= self.sim_th:
+                chosen = int(best_face[0])
+                reason = f"face>=th({best_face[1]:.3f})"
+
+        # B) Altrimenti, prova corpo con gate sugli ID ancorati (face) se configurato
+        if chosen is None and body_vec is not None:
+            # filtra candidati se richiesto
+            cand_body = [(pid, fs, bs, asim, fused) for (pid, fs, bs, asim, fused) in cand
+                         if (not self.require_face_if_available) or _id_has_face(pid)]
+            best_body = max(cand_body, key=lambda r: r[2]) if cand_body else None
+            if best_body and best_body[2] >= self.body_only_th:
+                chosen = int(best_body[0])
+                reason = f"body>=th({best_body[2]:.3f})"
+
+        # C) In mancanza, valuta aspetto legacy (più severo)
+        if chosen is None and app_sig is not None:
+            cand_app = [(pid, fs, bs, asim, fused) for (pid, fs, bs, asim, fused) in cand
+                        if (not self.require_face_if_available) or _id_has_face(pid)]
+            best_app = max(cand_app, key=lambda r: r[3]) if cand_app else None
+            if best_app and best_app[3] >= self.app_only_min_th:
+                chosen = int(best_app[0])
+                reason = f"app>=th({best_app[3]:.3f})"
+
+        # D) Se nulla supera le soglie → crea nuovo
+        if chosen is None:
+            new_id = self.next_global_id
+            self.next_global_id += 1
+            self.mem[new_id] = {'feats': [], 'app': [], 'body': [], 'last': now, 'created': now, 'hits': 1,
+                                'meta': {'gender_hist': {}, 'age_hist': {}}}
+            # seeding banche
+            if feat is not None:
+                self._add_feat(new_id, feat, now)
+            if body_vec is not None and self.allow_body_seed:
+                self._add_body(new_id, body_vec, now)
+            if app_sig is not None:
+                # non vincolante: aggiungi anche aspetto legacy (opzionale)
+                self._add_app(new_id, app_sig, now)
+            if self.debug:
+                top3 = cand[:3]
+                print(f"[ReID] NEW -> G{new_id} | reason={reason} top3={[(p, round(f,3), round(b,3), round(a,3)) for (p,f,b,a,_) in top3]}")
+            return new_id
+
+        # Match su ID esistente
+        pid = self.canon(chosen)
+        if feat is not None:
+            self._add_feat(pid, feat, now)
+        if body_vec is not None:
+            self._add_body(pid, body_vec, now)
+        if app_sig is not None:
+            self._add_app(pid, app_sig, now)
+
+        if self.debug:
+            top3 = cand[:3]
+            print(f"[ReID] MATCH -> G{pid} | reason={reason} top3={[(p, round(f,3), round(b,3), round(a,3)) for (p,f,b,a,_) in top3]}")
+        return pid
+
+    def touch(self, global_id: int, now_ts: Optional[float] = None):
+        now = time.time() if now_ts is None else now_ts
+        pid = self.canon(global_id)
+        info = self.mem.get(pid)
+        if info:
+            info['last'] = now
+            self.mem[pid] = info
 
     def update_meta(self, pid: int, gender: str, age_bucket: str):
         pid = self.canon(pid)

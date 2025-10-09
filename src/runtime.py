@@ -25,7 +25,7 @@ from .aggregator import MinuteAggregator
 from .face_detector import YuNetDetector
 from .person_detector import PersonDetector
 from .reid_memory import FaceReID
-
+from .body_reid import BodyReID
 
 # -------------------- Camera helpers --------------------
 def open_camera(index: int, width: int, height: int):
@@ -155,14 +155,49 @@ def run_pipeline(state: HealthState, cfg) -> None:
                 weight=float(getattr(cfg, "appearance_weight", 0.35)),
                 app_th=float(getattr(cfg, "reid_app_similarity_th", 0.82)),
             )
-            reid.set_id_policy(
-                appearance_weight=float(getattr(cfg, "appearance_weight", 0.35)),
-                app_only_min_th=float(getattr(cfg, "reid_app_only_th", 0.65)),
-                require_face_if_available=bool(getattr(cfg, "reid_require_face_if_available", True)),
-                face_gate=float(getattr(cfg, "reid_face_gate", max(getattr(cfg, "reid_similarity_th", 0.35), 0.42))),
-            )
+            # NEW: estendi policy con body_only_th / allow_body_seed in modo retro-compatibile
+            try:
+                reid.set_id_policy(
+                    appearance_weight=float(getattr(cfg, "appearance_weight", 0.35)),
+                    app_only_min_th=float(getattr(cfg, "reid_app_only_th", 0.65)),
+                    require_face_if_available=bool(getattr(cfg, "reid_require_face_if_available", True)),
+                    face_gate=float(getattr(cfg, "reid_face_gate", max(getattr(cfg, "reid_similarity_th", 0.35), 0.42))),
+                    body_only_th=float(getattr(cfg, "body_only_th", 0.80)),
+                    allow_body_seed=bool(getattr(cfg, "reid_allow_body_seed", True)),
+                )
+            except TypeError:
+                reid.set_id_policy(
+                    appearance_weight=float(getattr(cfg, "appearance_weight", 0.35)),
+                    app_only_min_th=float(getattr(cfg, "reid_app_only_th", 0.65)),
+                    require_face_if_available=bool(getattr(cfg, "reid_require_face_if_available", True)),
+                    face_gate=float(getattr(cfg, "reid_face_gate", max(getattr(cfg, "reid_similarity_th", 0.35), 0.42))),
+                )
+            # NEW: verbose debug decisioni ReID (se supportato)
+            if hasattr(reid, "set_debug"):
+                reid.set_debug(bool(getattr(cfg, "debug_reid_verbose", False)))
         except Exception:
             pass
+    
+    # NEW: Backend Body ReID opzionale (OSNet/Intel OMZ) – safe se non configurato o non disponibile
+    try:
+        body_model = getattr(cfg, "body_reid_model_path", "")
+        if BodyReID is not None and isinstance(body_model, str) and len(body_model.strip()) > 0:
+            body_backend = BodyReID(
+                model_path=body_model,
+                backend_id=int(getattr(cfg, "body_reid_backend", 0)),
+                target_id=int(getattr(cfg, "body_reid_target", 0)),
+                input_size=(
+                    int(getattr(cfg, "body_reid_input_w", 128)),
+                    int(getattr(cfg, "body_reid_input_h", 256)),
+                ),
+            )
+            if hasattr(reid, "set_body_backend"):
+                reid.set_body_backend(body_backend)
+            print("[OK] Body ReID backend caricato.")
+        else:
+            print("[INFO] Body ReID non configurato.")
+    except Exception as e:
+        print(f"[WARN] Body ReID init failed: {e}")
 
     # Counting mode & eviction callback (fuori dal try di init reid)
     count_mode = str(getattr(cfg, "count_mode", "presence")).lower()
@@ -415,13 +450,13 @@ def run_pipeline(state: HealthState, cfg) -> None:
                     tid = t["track_id"]
                     tstate = tracker.tracks.get(tid, {})
                     x, y, w, h = map(int, t["bbox"])
-                    person_crop = vis[max(0,y): y+h, max(0,x): x+w]
+                    person_crop = vis[max(0, y): y + h, max(0, x): x + w]
                     matched_face = face_assoc.get(tid)
 
                     if "global_id" not in tstate:
                         if matched_face is not None:
                             fx, fy, fw, fh = map(int, matched_face)
-                            face_crop = vis[max(0,fy): fy+fh, max(0,fx): fx+fw]
+                            face_crop = vis[max(0, fy): fy + fh, max(0, fx): fx + fw]
                         else:
                             face_crop = None
                         # Usa persona come 'appearance', volto (se c'è) come face
@@ -432,8 +467,14 @@ def run_pipeline(state: HealthState, cfg) -> None:
                                 appearance_bgr_crop=person_crop
                             )
                         except TypeError:
-                            # fallback vecchia firma
-                            gid = reid.assign_global_id(face_crop, None)
+                            try:
+                                gid = reid.assign_global_id(
+                                    face_bgr_crop=face_crop,
+                                    kps5=None,
+                                    appearance_bgr_crop=person_crop,
+                                )
+                            except TypeError:
+                                gid = reid.assign_global_id(face_crop, None)
                         gid = reid.canon(gid)
                         tstate["global_id"] = gid
                         tstate["assigned_with_face"] = (matched_face is not None)
@@ -495,48 +536,57 @@ def run_pipeline(state: HealthState, cfg) -> None:
 
                 # Classificazione (cache ogni cls_interval_ms, solo se volto abbastanza grande)
                 for t in tracks:
-                  tid = t["track_id"]
-                  tstate = tracker.tracks.get(tid, {})
-                  fb = tstate.get("face_bbox", None)
-                  if fb is None:
-                      # niente volto associato → mantieni le label correnti (unknown)
-                      cached = cls_cache_per_track.get(tid, {"gender": "unknown", "ageBucket": "unknown", "confidence": 0.0})
-                      tracker.apply_labels(tid, cached.get("gender", "unknown"), cached.get("ageBucket", "unknown"), cached.get("confidence", 0.0))
-                      continue
+                    tid = t["track_id"]
+                    tstate = tracker.tracks.get(tid, {})
+                    fb = tstate.get("face_bbox", None)
+                    if fb is None:
+                        # niente volto associato → mantieni le label correnti (unknown)
+                        cached = cls_cache_per_track.get(tid, {"gender": "unknown", "ageBucket": "unknown", "confidence": 0.0})
+                        tracker.apply_labels(tid, cached.get("gender", "unknown"), cached.get("ageBucket", "unknown"), cached.get("confidence", 0.0))
+                        continue
 
-                  fx, fy, fw, fh = map(int, fb)
-                  if min(fw, fh) >= int(getattr(cfg, "cls_min_face_px", 64)):
-                      last_ts_t = last_cls_ts_per_track.get(tid, 0.0)
-                      if (now - last_ts_t) * 1000.0 >= cls_interval_ms:
-                          face_roi = vis[max(0, fy): fy + fh, max(0, fx): fx + fw]
-                          res = classifier.infer(face_roi)
-                          # Se l'ID era stato assegnato senza volto, ora che il volto c'è riconsidera l'assegnazione
-                          try:
-                              if not tstate.get("assigned_with_face", False):
-                                  # prova a riassegnare usando volto + persona
-                                  new_gid = reid.assign_global_id(
-                                      face_bgr_crop=face_roi,
-                                      kps5=None,
-                                      appearance_bgr_crop=vis[max(0, t["bbox"][1]): t["bbox"][1]+t["bbox"][3], max(0, t["bbox"][0]): t["bbox"][0]+t["bbox"][2]]
-                                  )
-                                  new_gid = reid.canon(new_gid)
-                                  if new_gid != tstate.get("global_id", tid):
-                                      tstate["global_id"] = new_gid
-                                  tstate["assigned_with_face"] = True
-                                  tracker.tracks[tid] = tstate
-                          except Exception:
-                              pass
-                          cls_cache_per_track[tid] = res
-                          last_cls_ts_per_track[tid] = now
-                          # aggiorna meta del global id (se disponibile)
-                          try:
-                              gid = reid.canon(tstate.get("global_id", tid))
-                              if hasattr(reid, "update_meta"):
-                                  reid.update_meta(gid, res.get("gender","unknown"), res.get("ageBucket","unknown"))
-                          except Exception:
-                              pass
-                  cached = cls_cache_per_track.get(tid, {"gender": "unknown", "ageBucket": "unknown", "confidence": 0.0})
-                  tracker.apply_labels(tid, cached.get("gender", "unknown"), cached.get("ageBucket", "unknown"), cached.get("confidence", 0.0))
+                    fx, fy, fw, fh = map(int, fb)
+                    if min(fw, fh) >= int(getattr(cfg, "cls_min_face_px", 64)):
+                        last_ts_t = last_cls_ts_per_track.get(tid, 0.0)
+                        if (now - last_ts_t) * 1000.0 >= cls_interval_ms:
+                            face_roi = vis[max(0, fy): fy + fh, max(0, fx): fx + fw]
+                            res = classifier.infer(face_roi)
+                            # Se l'ID era stato assegnato senza volto, ora che il volto c'è riconsidera l'assegnazione
+                            try:
+                                if not tstate.get("assigned_with_face", False):
+                                    # prova a riassegnare usando volto + persona
+                                    try:
+                                        new_gid = reid.assign_global_id(
+                                            face_bgr_crop=face_roi,
+                                            kps5=None,
+                                            body_bgr_crop=vis[max(0, t["bbox"][1]): t["bbox"][1] + t["bbox"][3],
+                                                              max(0, t["bbox"][0]): t["bbox"][0] + t["bbox"][2]],
+                                        )
+                                    except TypeError:
+                                        new_gid = reid.assign_global_id(
+                                            face_bgr_crop=face_roi,
+                                            kps5=None,
+                                            appearance_bgr_crop=vis[max(0, t["bbox"][1]): t["bbox"][1] + t["bbox"][3],
+                                                                    max(0, t["bbox"][0]): t["bbox"][0] + t["bbox"][2]],
+                                        )
+                                    new_gid = reid.canon(new_gid)
+                                    if new_gid != tstate.get("global_id", tid):
+                                        tstate["global_id"] = new_gid
+                                    tstate["assigned_with_face"] = True
+                                    tracker.tracks[tid] = tstate
+                            except Exception:
+                                pass
+                            cls_cache_per_track[tid] = res
+                            last_cls_ts_per_track[tid] = now
+                            # aggiorna meta del global id (se disponibile)
+                            try:
+                                gid = reid.canon(tstate.get("global_id", tid))
+                                if hasattr(reid, "update_meta"):
+                                    reid.update_meta(gid, res.get("gender","unknown"), res.get("ageBucket","unknown"))
+                            except Exception:
+                                pass
+                    cached = cls_cache_per_track.get(tid, {"gender": "unknown", "ageBucket": "unknown", "confidence": 0.0})
+                    tracker.apply_labels(tid, cached.get("gender", "unknown"), cached.get("ageBucket", "unknown"), cached.get("confidence", 0.0))
 
 
                 # Tripwire crossing (solo se count_mode == "tripwire")

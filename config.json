@@ -80,6 +80,17 @@
   "reid_require_face_if_available": true,
   "count_dedup_ttl_sec": 600,
 
+  "body_reid_model_path": "models/osnet_x0_25_msmt17.onnx",
+  "body_reid_input_w": 128,
+  "body_reid_input_h": 256,
+  "body_reid_backend": 0,
+  "body_reid_target": 0,
+
+  "body_only_th": 0.80,
+  "reid_allow_body_seed": true,
+
+  "debug_reid_verbose": false,
+
   "metrics_window_sec": 5,
   "metrics_retention_min": 120
 }

@@ -66,8 +66,8 @@ Ambito: tuning best‑effort per flussi RTSP con OpenCV/FFmpeg.
 
 Ambito: mantenere un ID coerente per persona/volto tra frame consecutivi (SORT‑lite).
 
-- tracker_max_age (default: 15): frame tollerati senza update.
-- tracker_min_hits (default: 2): hit minimi per attivare un track.
+- tracker_max_age (default: 12): frame tollerati senza update.
+- tracker_min_hits (default: 3): hit minimi per attivare un track.
 - tracker_iou_th (default: 0.35): soglia IoU per matching.
 
 
@@ -79,7 +79,7 @@ Ambito: detection primaria delle persone. Se presente, il tracker usa queste bbo
 
 - person_model_path (default: ""): path ONNX (vuoto = disattivato).
 - person_img_size (default: 640): lato input del modello.
-- person_score_th (default: 0.35): soglia confidenza minima.
+- person_score_th (default: 0.26): soglia confidenza minima.
 - person_iou_th (default: 0.45): soglia IoU per NMS.
 - person_max_det (default: 200): massimo numero di box in output.
 - person_backend (default: 0), person_target (default: 0): backend/target DNN.
@@ -88,7 +88,7 @@ Ambito: detection primaria delle persone. Se presente, il tracker usa queste bbo
 
 Ambito: detection volti per età/genere e ancoraggio ReID via embedding facciale.
 
-- detector_model (default: "models/face_detection_yunet_2023mar.onnx").
+- detector_model (default: "").
 - detector_score_th (default: 0.8).
 - detector_nms_iou (default: 0.3).
 - detector_top_k (default: 5000).
@@ -108,7 +108,7 @@ Ambito: collegare un volto alla bbox persona più plausibile per usare volto nel
 
 Ambito: stima genere/età da crop volto via ONNX Runtime.
 
-- age_model_path (default: "models/age.onnx"), gender_model_path (default: "models/gender.onnx").
+- age_model_path (default: ""), gender_model_path (default: "").
 - age_buckets (default: ["0-13","14-24","25-34","35-44","45-54","55-64","65+"]).
 - cls_min_face_px (default: 64): lato minimo volto per inferenza.
 - cls_min_conf (default: 0.35): soglia confidenza genere.
@@ -118,8 +118,8 @@ Ambito: stima genere/età da crop volto via ONNX Runtime.
 
 Ambito: un solo ONNX che predice età+genere.
 
-- combined_model_path (default: "models/age-gender-recognition-retail-0013.onnx").
-- combined_input_size (default: [62,62]).
+- combined_model_path (default: "").
+- combined_input_size (default: [96, 96]).
 - combined_bgr_input (default: true).
 - combined_scale01 (default: false).
 - combined_age_scale (default: 100.0).
@@ -154,7 +154,7 @@ La pipeline usa embedding di volto e corpo, più una firma di aspetto (colore) c
 ### Face ReID (SFace/ArcFace)
 
 - reid_enabled (default: true): abilita ReID volto.
-- reid_model_path (default: "models/face_recognition_sface_2021dec.onnx").
+- reid_model_path (default: "").
 - reid_similarity_th (default: 0.365): soglia match volto.
 - reid_face_gate (default: 0.42): gate minimo per considerare affidabile il volto.
 - reid_require_face_if_available (default: true): preferisci ID già ancorati da volto.

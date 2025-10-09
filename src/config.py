@@ -48,7 +48,7 @@ _DEFAULTS: Dict[str, Any] = {
     # --- Person detector (primary tracking) ---
     "person_model_path": "",       # es: "models/yolov8n.onnx"
     "person_img_size": 640,
-    "person_score_th": 0.35,
+    "person_score_th": 0.26,
     "person_iou_th": 0.45,
     "person_max_det": 200,
     "person_backend": 0,           # OpenCV DNN backend id
@@ -60,7 +60,7 @@ _DEFAULTS: Dict[str, Any] = {
 
     # --- Face detector (YuNet) ---
     # Compat: se presente "yunet": { onnx_path, score_th, nms_th, top_k } verrà mappato qui.
-    "detector_model": "models/face_detection_yunet_2023mar.onnx",
+    "detector_model": "",
     "detector_score_th": 0.8,
     "detector_nms_iou": 0.3,
     "detector_top_k": 5000,
@@ -69,8 +69,8 @@ _DEFAULTS: Dict[str, Any] = {
     "detector_resize_width": 640,  # opzionale: resize solo per il detector
 
     # --- Classifier: modelli SEPARATI (opzionali) ---
-    "age_model_path": "models/age.onnx",
-    "gender_model_path": "models/gender.onnx",
+    "age_model_path": "",
+    "gender_model_path": "",
     "age_buckets": ["0-13", "14-24", "25-34", "35-44", "45-54", "55-64", "65+"],
     "cls_min_face_px": 64,
     "cls_min_conf": 0.35,
@@ -79,16 +79,16 @@ _DEFAULTS: Dict[str, Any] = {
     # --- Classifier: MODELLO COMBINATO (consigliato) ---
     # Default tarati per Intel age-gender-recognition-retail-0013 (BGR 62x62, out: age/100 + prob[F,M])
     # Se non esiste il file indicato, il classifier prova i modelli separati; se non ci sono neppure quelli -> fallback unknown.
-    "combined_model_path": "models/age-gender-recognition-retail-0013.onnx",
-    "combined_input_size": [62, 62],
+    "combined_model_path": "",
+    "combined_input_size": [96, 96],
     "combined_bgr_input": True,
     "combined_scale01": False,
     "combined_age_scale": 100.0,
     "combined_gender_order": ["female", "male"],
 
     # --- Tracker ---
-    "tracker_max_age": 15,
-    "tracker_min_hits": 2,
+    "tracker_max_age": 12,
+    "tracker_min_hits": 3,
     "tracker_iou_th": 0.35,
 
     # --- ROI / Tripwire ---
@@ -98,7 +98,7 @@ _DEFAULTS: Dict[str, Any] = {
 
     # --- Re-Identification (facoltativo, usa YuNet landmarks + SFace) ---
     "reid_enabled": True,
-    "reid_model_path": "models/face_recognition_sface_2021dec.onnx",
+    "reid_model_path": "",
     "reid_similarity_th": 0.365,   # ~ soglia tipica SFace cosine (regola in base ai test)
     "reid_cache_size": 1000,       # max persone ricordate
     "reid_memory_ttl_sec": 600,    # 10 minuti: mantieni l'associazione global_id

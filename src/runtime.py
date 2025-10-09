@@ -93,8 +93,8 @@ def run_pipeline(state: HealthState, cfg) -> None:
 
     # Tracker
     tracker = SortLiteTracker(
-        max_age=int(getattr(cfg, "tracker_max_age", 15)),
-        min_hits=int(getattr(cfg, "tracker_min_hits", 2)),
+        max_age=int(getattr(cfg, "tracker_max_age", 12)),
+        min_hits=int(getattr(cfg, "tracker_min_hits", 3)),
         iou_th=float(getattr(cfg, "tracker_iou_th", 0.35)),
         smooth_win=8,
         smooth_alpha=0.5,
@@ -131,7 +131,7 @@ def run_pipeline(state: HealthState, cfg) -> None:
         reid_enabled = bool(getattr(cfg, "reid_enabled", True))
         if reid_enabled:
             reid = FaceReID(
-                model_path=getattr(cfg, "reid_model_path", "models/face_recognition_sface_2021dec.onnx"),
+                model_path=getattr(cfg, "reid_model_path", ""),
                 similarity_th=float(getattr(cfg, "reid_similarity_th", 0.365)),
                 cache_size=int(getattr(cfg, "reid_cache_size", 1000)),
                 memory_ttl_sec=int(getattr(cfg, "reid_memory_ttl_sec", 600)),
@@ -273,7 +273,7 @@ def run_pipeline(state: HealthState, cfg) -> None:
             person_det = PersonDetector(
                 model_path=p_model,
                 img_size=int(getattr(cfg, "person_img_size", 640)),
-                score_th=float(getattr(cfg, "person_score_th", 0.35)),
+                score_th=float(getattr(cfg, "person_score_th", 0.26)),
                 iou_th=float(getattr(cfg, "person_iou_th", 0.45)),
                 max_det=int(getattr(cfg, "person_max_det", 200)),
                 backend_id=int(getattr(cfg, "person_backend", 0)),

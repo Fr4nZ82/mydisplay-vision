@@ -1,19 +1,23 @@
 # -*- coding: utf-8 -*-
 """
+src/api.py
 FastAPI app with:
-- /health, /stats                         (come prima)
-- /debug (HTML), /debug/frame, /debug/stream  (come prima)
-- /metrics/minute?last=N                  (NUOVO; se aggregator presente)
-- /config                                 (NUOVO; se config presente)
+- /health, /stats
+- /debug (HTML), /debug/frame, /debug/stream 
+- /metrics/minute?last=N
+- /config
 """
 from __future__ import annotations
 
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, StreamingResponse, Response, JSONResponse
-from typing import Any, Optional, Callable
+from fastapi.responses import HTMLResponse, StreamingResponse, Response, JSONResponse, FileResponse
+from typing import Any, Optional
 from datetime import datetime, timezone
+from pathlib import Path
 import time
 
+WEB_DIR = Path(__file__).resolve().parent / "web"   # -> src/web
+DEBUG_HTML = WEB_DIR / "debug.html"
 
 def _uptime_sec(since_iso: str | None) -> int | None:
     if not since_iso:
@@ -27,13 +31,6 @@ def _uptime_sec(since_iso: str | None) -> int | None:
 
 
 def _get_config_from_state(state) -> Optional[dict]:
-    """
-    Prova a leggere la config dallo state:
-    - metodo state.get_config() → dict o oggetto con .data
-    - chiave state["config"]
-    - attributo state.config
-    Restituisce un dict pronto per JSON o None.
-    """
     try:
         if hasattr(state, "get_config") and callable(getattr(state, "get_config")):
             cfg = state.get_config()
@@ -43,10 +40,8 @@ def _get_config_from_state(state) -> Optional[dict]:
             cfg = getattr(state, "config")
         else:
             return None
-
         if isinstance(cfg, dict):
             return cfg
-        # oggetto con .data (es. Config dataclass)
         data = getattr(cfg, "data", None)
         if isinstance(data, dict):
             return data
@@ -56,12 +51,6 @@ def _get_config_from_state(state) -> Optional[dict]:
 
 
 def _get_aggregator_from_state(state):
-    """
-    Prova a ottenere l'aggregatore dallo state:
-    - metodo state.get_aggregator()
-    - chiave state["aggregator"]
-    - attributo state.aggregator
-    """
     try:
         if hasattr(state, "get_aggregator") and callable(getattr(state, "get_aggregator")):
             return state.get_aggregator()
@@ -105,55 +94,19 @@ def build_app(state) -> FastAPI:
         }
 
     @app.get("/debug", response_class=HTMLResponse)
-    def debug_page() -> str:
-        return """
-<!doctype html>
-<html lang="it">
-<head>
-  <meta charset="utf-8" />
-  <title>MyDisplay Vision - Debug</title>
-  <style>
-    :root { color-scheme: dark; }
-    body { font-family: system-ui, sans-serif; padding: 16px; background: #111; color: #ddd; }
-    .wrap { max-width: none; margin: 0 auto; }
-    .controls { margin: 8px 0 16px; display: flex; gap: 8px; align-items: center; }
-    button { background:#222; color:#ddd; border:1px solid #444; padding:6px 10px; border-radius:6px; cursor:pointer; }
-    button:hover { background:#2a2a2a; }
-    img { border: 2px solid #444; border-radius: 8px; display:block; }
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <h1>MyDisplay Vision — Debug</h1>
-    <p>Stream MJPEG live con annotazioni (volti rilevati).</p>
-
-    <div class="controls">
-      <button onclick="fit()">Fit</button>
-      <button onclick="one()">1:1</button>
-      <span id="info" style="opacity:.8"></span>
-    </div>
-
-    <img id="stream" src="/debug/stream" alt="debug stream" />
-
-    <p style="opacity:.8">Se lo stream risultasse lento, prova <code><a href="/debug/frame" style="color:#9cf">/debug/frame</a></code> (singolo frame).</p>
-  </div>
-
-  <script>
-    const img = document.getElementById('stream');
-    function fit(){ img.style.maxWidth = '95vw'; img.style.width = ''; }
-    function one(){ img.style.maxWidth = 'none'; img.style.width = ''; }
-
-    // mostra dimensione acquisita (dalla /health)
-    fetch('/health').then(r=>r.json()).then(j=>{
-      document.getElementById('info').textContent = `capture: ${j.size[0]}×${j.size[1]}`;
-    }).catch(()=>{});
-
-    // default: fit
-    fit();
-  </script>
-</body>
-</html>
-    """.strip()
+    def debug_page() -> HTMLResponse:
+        if DEBUG_HTML.exists():
+            return HTMLResponse(DEBUG_HTML.read_text(encoding="utf-8"))
+        # Fallback (se il file non esiste ancora)
+        return HTMLResponse("<h1>MyDisplay Vision — Debug</h1><p>Manca src/web/debug.html</p>")
+    
+    @app.get("/debug/data")
+    def debug_data():
+        try:
+            payload = state.get_reid_debug()
+            return JSONResponse(payload)
+        except Exception:
+            return JSONResponse({'mem': [], 'active': {}}, status_code=200)
 
     @app.get("/debug/frame")
     def debug_frame() -> Response:
@@ -165,47 +118,55 @@ def build_app(state) -> FastAPI:
     @app.get("/debug/stream")
     def debug_stream():
         boundary = "frame"
+
         def gen():
             while True:
                 jpg = state.get_debug_jpeg()
                 if jpg is None:
                     time.sleep(0.1)
                     continue
-                yield (b"--" + boundary.encode() + b"\r\n"
-                       b"Content-Type: image/jpeg\r\n"
-                       b"Content-Length: " + str(len(jpg)).encode() + b"\r\n\r\n"
-                       + jpg + b"\r\n")
-                # conserva lo stesso controllo FPS lato server
+
+                yield (
+                    b"--" + boundary.encode() + b"\r\n"
+                    b"Content-Type: image/jpeg\r\n"
+                    b"Content-Length: " + str(len(jpg)).encode() + b"\r\n\r\n"
+                    + jpg + b"\r\n"
+                )
+
                 try:
                     fps = max(state.get_stream_fps(), 0.1)
                 except Exception:
                     fps = 5.0
                 time.sleep(1.0 / fps)
-        return StreamingResponse(gen(), media_type=f"multipart/x-mixed-replace; boundary={boundary}")
+
+        return StreamingResponse(
+            gen(),
+            media_type=f"multipart/x-mixed-replace; boundary={boundary}",
+            headers={"Cache-Control": "no-store"},
+        )
 
     # ---------------------- NUOVI Endpoints ----------------------
 
     @app.get("/metrics/minute")
-    def metrics_minute(last: int = 10):
-        """
-        Ritorna gli ultimi N aggregati (se l'aggregatore è disponibile nello state).
-        Se non disponibile, restituisce [].
-        """
+    def metrics_minute(last: int = 10, includeCurrent: int = 1):
         agg = _get_aggregator_from_state(state)
         if agg and hasattr(agg, "get_last"):
             try:
                 last_int = max(1, min(int(last), 500))
             except Exception:
                 last_int = 10
-            return agg.get_last(last_int)
-        # fallback: niente aggregatore disponibile
+            out = list(agg.get_last(last_int))
+            if includeCurrent and hasattr(agg, "get_current"):
+                cur = agg.get_current()
+                if cur:
+                    # evita duplicato se coincide temporalmente con l'ultima chiusa
+                    if not out or (out and out[-1].get("ts") != cur.get("ts")):
+                        out.append(cur)
+            return out
         return []
 
     @app.get("/config")
     def get_config():
-        """
-        Restituisce la configurazione attiva se disponibile nello state.
-        """
         cfg = _get_config_from_state(state)
         if cfg is None:
             return JSONResponse({"error": "config not available"}, status_code=404)

@@ -23,7 +23,9 @@ from .utils_vis import resize_keep_aspect, draw_box_with_label
 from .tracker import SortLiteTracker
 from .age_gender import AgeGenderClassifier
 from .aggregator import MinuteAggregator
-from .face_detector import YuNetDetector  # wrapper già usato nel tuo main precedente
+from .face_detector import YuNetDetector
+from .reid_memory import FaceReID
+
 
 
 # -------------------- Camera helpers --------------------
@@ -43,6 +45,35 @@ def open_camera(index: int, width: int, height: int):
         last_err = f"Backend {be} failed"
     raise RuntimeError(f"Cannot open camera index={index}. Last: {last_err}")
 
+def open_rtsp(url: str, cfg):
+    """
+    Apre un flusso RTSP via FFmpeg (OpenCV). Supporta opzioni base da config.
+    """
+    # Opzioni RTSP
+    transport = getattr(cfg, "rtsp_transport", "tcp")
+    url_eff = url
+    if url.lower().startswith("rtsp://") and transport and "rtsp_transport=" not in url:
+        sep = "&" if "?" in url else "?"
+        url_eff = f"{url}{sep}rtsp_transport={transport}"
+
+    cap = cv2.VideoCapture(url_eff, cv2.CAP_FFMPEG)
+
+    # Timeout (best-effort: proprietà disponibili solo su alcune build)
+    try:
+        ot = float(getattr(cfg, "rtsp_open_timeout_ms", 4000))
+        rt = float(getattr(cfg, "rtsp_read_timeout_ms", 4000))
+        cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, ot)
+        cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, rt)
+    except Exception:
+        pass
+
+    # Buffer interno (in frame; non tutte le build lo rispettano)
+    try:
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, float(getattr(cfg, "rtsp_buffer_frames", 2)))
+    except Exception:
+        pass
+
+    return cap
 
 # -------------------- Pipeline --------------------
 
@@ -98,6 +129,42 @@ def run_pipeline(state: HealthState, cfg) -> None:
     roi_direction = getattr(cfg, "roi_direction", "both")
     roi_band_px = int(getattr(cfg, "roi_band_px", 12))
 
+    # --- Re-Identification (memoria facce) + dedup conteggio ---
+    try:
+        reid_enabled = bool(getattr(cfg, "reid_enabled", True))
+        if reid_enabled:
+            reid = FaceReID(
+                model_path=getattr(cfg, "reid_model_path", "models/face_recognition_sface_2021dec.onnx"),
+                similarity_th=float(getattr(cfg, "reid_similarity_th", 0.365)),
+                cache_size=int(getattr(cfg, "reid_cache_size", 1000)),
+                memory_ttl_sec=int(getattr(cfg, "reid_memory_ttl_sec", 600)),
+                bank_size=int(getattr(cfg, "reid_bank_size", 10)),
+                merge_sim=float(getattr(cfg, "reid_merge_sim", 0.55)),
+                prefer_oldest=bool(getattr(cfg, "reid_prefer_oldest", True)),
+            )
+        else:
+            reid = FaceReID("", 1.0, 1, 1)  # istanza "spenta" safe
+        print(f"[OK] ReID enabled={getattr(reid,'enabled',False)}")
+    except Exception as e:
+        print(f"[WARN] ReID init failed: {e}")
+        reid = FaceReID("", 1.0, 1, 1)
+
+    # mappa per dedup dei conteggi: global_id -> last_count_ts
+    from collections import OrderedDict
+    count_seen = OrderedDict()
+
+    def should_count(global_id: int, now_ts: float) -> bool:
+        ttl = int(getattr(cfg, "count_dedup_ttl_sec", 600))
+        last = count_seen.get(global_id)
+        if (last is not None) and ((now_ts - last) < ttl):
+            return False
+        count_seen[global_id] = now_ts
+        # tenue pruning per non far crescere la mappa all’infinito
+        if len(count_seen) > 5000:
+            while len(count_seen) > 4000:
+                count_seen.popitem(last=False)
+        return True
+    
     # Detector (YuNet) come nel main originale
     detector = None
     try:
@@ -115,7 +182,17 @@ def run_pipeline(state: HealthState, cfg) -> None:
 
     # Apertura camera
     try:
-        cap = open_camera(getattr(cfg, "camera", 0), getattr(cfg, "width", 1920), getattr(cfg, "height", 1080))
+        cam_cfg = getattr(cfg, "camera", 0)
+        is_rtsp = isinstance(cam_cfg, str) and cam_cfg.lower().startswith("rtsp://")
+
+        if is_rtsp:
+            cap = open_rtsp(cam_cfg, cfg)
+        else:
+            cap = open_camera(int(cam_cfg), getattr(cfg, "width", 1920), getattr(cfg, "height", 1080))
+
+        if not cap or not cap.isOpened():
+          raise RuntimeError(f"Cannot open {'RTSP' if is_rtsp else 'camera'}: {cam_cfg}")
+
     except Exception as e:
         print(f"[FATAL] Impossibile aprire la camera: {e}")
         state.update(camera_ok=False, fps=0.0, width=0, height=0)
@@ -140,10 +217,43 @@ def run_pipeline(state: HealthState, cfg) -> None:
         while True:
             ok, frame = cap.read()
             now = time.time()
+             # Avanza le finestre metriche anche senza eventi
+            try:
+                aggregator.tick(now)
+            except Exception:
+                pass
+            ok, frame = cap.read()
+            now = time.time()
+
+            # init contatori fallimenti (una sola volta)
+            if 'rtsp_fail_count' not in locals():
+                rtsp_fail_count = 0
+                rtsp_max_fail   = int(getattr(cfg, "rtsp_max_failures", 60))           # ~60*50ms = 3s
+                rtsp_reconnect  = float(getattr(cfg, "rtsp_reconnect_sec", 2.0))
+
             if not ok or frame is None:
-                time.sleep(0.05)
                 state.update(camera_ok=False, fps=0.0, width=0, height=0)
+
+                if is_rtsp:
+                    rtsp_fail_count += 1
+                    if rtsp_fail_count >= rtsp_max_fail:
+                        try:
+                            cap.release()
+                        except Exception:
+                            pass
+                        time.sleep(rtsp_reconnect)
+                        cap = open_rtsp(cam_cfg, cfg)
+                        rtsp_fail_count = 0
+                    else:
+                        time.sleep(0.05)
+                else:
+                    time.sleep(0.05)
                 continue
+            else:
+                # reset fallimenti su frame valido
+                if is_rtsp:
+                    rtsp_fail_count = 0
+
 
             frame_count += 1
 
@@ -180,6 +290,55 @@ def run_pipeline(state: HealthState, cfg) -> None:
                 # Tracking
                 tracks = tracker.update(detections)
 
+                # Assegna un global_id (re-ID) ai track che non l'hanno ancora
+                for t in tracks:
+                    tid = t["track_id"]
+                    # se il tracker tiene stato per track:
+                    tstate = tracker.tracks.get(tid, {})
+                    if "global_id" not in tstate:
+                        x, y, w, h = map(int, t["bbox"])
+                        face_roi_full = vis[max(0, y): y + h, max(0, x): x + w]
+                        # NB: SFace rende meglio con facce allineate; se non hai landmark, usa il crop grezzo
+                        # La classe FaceReID gestisce comunque il caso enabled=False senza errori
+                        gid = reid.assign_global_id(face_roi_full, None)
+                        gid = reid.canon(gid)
+                        tstate["global_id"] = gid
+                        tracker.tracks[tid] = tstate  # salva nello stato del tracker
+
+                # --- BUILD SNAPSHOTS FOR DEBUG ---
+                # 1) Active tracks (per evidenziare in pagina gli ID visibili ora)
+                active = []
+                for t in tracks:
+                    tid = t["track_id"]
+                    tstate = tracker.tracks.get(tid, {})
+                    gid = tstate.get("global_id", tid)
+                    x, y, w, h = map(int, t["bbox"])
+                    active.append({'gid': int(gid), 'tid': int(tid), 'bbox': [x, y, w, h]})
+                state.set_active_tracks(active)
+
+                # 2) ReID memory snapshot (lista ordinata per id)
+                try:
+                    mem_items = []
+                    # Se hai adottato la feature bank come da step precedente:
+                    for pid, info in getattr(reid, 'mem', {}).items():
+                        canon = reid.canon(pid) if hasattr(reid, 'canon') else pid
+                        last = float(info.get('last', 0.0))
+                        created = float(info.get('created', last))
+                        mem_items.append({
+                            'id': int(canon),
+                            'rawId': int(pid),
+                            'hits': int(info.get('hits', 1)),
+                            'last': last,
+                            'created': created,
+                            'ageSec': max(0, time.time() - created),
+                        })
+                    # Ordina per id (o per "last" se preferisci i più recenti in alto)
+                    mem_items.sort(key=lambda r: r['id'])
+                    state.set_reid_debug(mem_items)
+                except Exception:
+                    # snapshot opzionale: ignora eventuali errori
+                    pass
+                
                 # Classificazione (cache ogni cls_interval_ms, solo se volto abbastanza grande)
                 for t in tracks:
                     tid = t["track_id"]
@@ -216,7 +375,23 @@ def run_pipeline(state: HealthState, cfg) -> None:
                                 tr_state = tracker.tracks.get(tid, {})
                                 gender = tr_state.get("gender", "unknown")
                                 age_bucket = tr_state.get("ageBucket", "unknown")
-                                aggregator.add_cross_event(gender=gender, age_bucket=age_bucket, direction_tag=dir_tag, track_id=tid, now=now)
+                                gid = tr_state.get("global_id", tid)
+                                gid = reid.canon(gid)
+                                now_ts = now
+                                # dedup: non riconteggiare lo stesso global_id entro TTL
+                                if should_count(gid, now_ts):
+                                    aggregator.add_cross_event(
+                                        gender=gender,
+                                        age_bucket=age_bucket,
+                                        direction_tag=dir_tag,
+                                        track_id=gid,
+                                        now=now_ts,
+                                    )
+                                # mantieni "viva" la memoria reid (touch)
+                                try:
+                                    reid.touch(gid, now_ts)
+                                except Exception:
+                                    pass
                         # aggiorna prev_center dopo il check
                         tracker.update_prev_center(tid)
 
@@ -228,10 +403,13 @@ def run_pipeline(state: HealthState, cfg) -> None:
 
                 for t in tracks:
                     tid = t["track_id"]
+                    tstate = tracker.tracks.get(tid, {})
+                    gid = tstate.get("global_id", tid)
+
                     g = t.get("gender", "unknown")
                     a = t.get("ageBucket", "unknown")
                     c = t.get("conf", 0.0)
-                    lbl = f"#{tid} {g[:1].upper() if g!='unknown' else '?'} / {a if a!='unknown' else '--'} ({c:.2f})"
+                    lbl = f"#G{gid} {g[:1].upper() if g!='unknown' else '?'} / {a if a!='unknown' else '--'} ({c:.2f})"
                     draw_box_with_label(vis, t["bbox"], lbl, (0, 180, 0))
 
                 # Pubblica JPEG allo state

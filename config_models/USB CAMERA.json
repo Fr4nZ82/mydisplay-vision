@@ -3,6 +3,13 @@
   "width": 1920,
   "height": 1080,
   "target_fps": 10.0,
+  "rtsp_transport": "tcp",
+  "rtsp_buffer_frames": 2,
+  "rtsp_open_timeout_ms": 4000,
+  "rtsp_read_timeout_ms": 4000,
+  "rtsp_reconnect_sec": 2.0,
+  "rtsp_max_failures": 60,
+  
   "debug_enabled": true,
   "debug_stream_fps": 5,
   "debug_resize_width": 960,
@@ -32,14 +39,24 @@
   "cls_min_conf": 0.35,
   "cls_interval_ms": 300,
 
-  "tracker_max_age": 15,
-  "tracker_min_hits": 2,
+  "tracker_max_age": 40,
+  "tracker_min_hits": 3,
   "tracker_iou_th": 0.35,
 
-  "roi_tripwire": [[0.1, 0.5], [0.9, 0.5]],
+  "roi_tripwire": [[0.5, 0.01], [0.5, 0.99]],
   "roi_direction": "both",
-  "roi_band_px": 12,
+  "roi_band_px": 8,
 
-  "metrics_window_sec": 60,
+  "reid_enabled": true,
+  "reid_model_path": "models/arcfaceresnet100-8.onnx",
+  "reid_similarity_th": 0.35,
+  "reid_cache_size": 1000,
+  "reid_memory_ttl_sec": 600,
+  "reid_bank_size": 10,
+  "reid_merge_sim": 0.55,
+  "reid_prefer_oldest": true,
+  "count_dedup_ttl_sec": 600,
+
+  "metrics_window_sec": 5,
   "metrics_retention_min": 120
 }

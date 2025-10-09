@@ -184,6 +184,41 @@ In pratica, la tripwire non è una linea infinitamente sottile, ma una fascia ch
 
 ---
 
+## Re-Identification (memoria facce)
+
+### reid_enabled
+Abilita o disabilita il riconoscimento ricorrente (Re-ID) dei volti.
+Quando true, il sistema calcola un’impronta (embedding) del volto e prova a riconoscerlo se riappare dopo essere uscito dall’inquadratura.
+Se il modello face_recognition_sface_2021dec.onnx non è presente o OpenCV non supporta SFace, la funzione viene ignorata automaticamente.
+
+## reid_model_path
+Percorso del modello ONNX per il riconoscimento facciale (embedding) usato dal Re-ID.
+È consigliato usare il modello Intel SFace incluso in OpenCV contrib:
+models/face_recognition_sface_2021dec.onnx.
+
+## reid_similarity_th
+Soglia di similarità (cosine similarity) tra due volti per considerarli la stessa persona.
+- Valori più alti → meno falsi positivi, ma rischio di non riconoscere la stessa persona con illuminazione diversa.
+- Valori più bassi → più tolleranza, ma possibili accoppiamenti errati.
+Esempio: 0.35 – 0.40 è un buon punto di partenza per SFace.
+
+## reid_cache_size
+Numero massimo di volti memorizzabili nella cache del Re-ID.
+Ogni voce contiene embedding e timestamp dell’ultima volta che la persona è stata vista.
+Quando il limite è superato, vengono eliminati i più vecchi.
+
+## reid_memory_ttl_sec
+Durata della “memoria” del Re-ID, in secondi.
+Se una persona non viene più vista per più di questo intervallo, la sua impronta viene rimossa e, al successivo ingresso, riceverà un nuovo ID.
+Esempio: 600 = 10 minuti.
+
+## count_dedup_ttl_sec
+Intervallo minimo (in secondi) prima che una stessa persona possa essere nuovamente conteggiata dopo un attraversamento della tripwire.
+Serve a evitare doppi conteggi per chi rientra subito nell’inquadratura o passa più volte davanti al display in poco tempo.
+Esempio: 600 = 10 minuti di blocco conteggio per la stessa persona.
+
+---
+
 ## 📊 Metriche / Aggregazione
 
 Ogni attraversamento (evento CROSS) viene inviato al modulo `MinuteAggregator`.  

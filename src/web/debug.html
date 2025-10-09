@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <title>MyDisplay Vision - Debug (Compact)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { color-scheme: dark; --bg:#0f1115; --card:#131722; --border:#1f2330; --muted:#94a3b8; --ok:#22c55e; }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body { margin:0; background:var(--bg); color:#e5e7eb; font:13px/1.35 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; overflow:hidden; }
+    h1 { margin:10px 14px; font-size:18px; font-weight:700; }
+
+    .layout {
+      height: calc(100% - 40px);
+      padding: 6px 14px 14px;
+      display: grid;
+      grid-template-columns: 1.1fr 1fr 1fr;
+      grid-template-rows: 0.72fr 0.58fr;
+      gap: 10px;
+      overflow: hidden;
+    }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:10px; display:flex; flex-direction:column; min-height:0; }
+    .card h2 { margin:0 0 8px; font-size:14px; font-weight:700; display:flex; align-items:center; gap:8px; }
+    .row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .muted { color: var(--muted); }
+    .kpis { display:flex; gap:10px; flex-wrap:wrap; padding: 0 14px 8px; }
+    .kpi { background:#0d1320; border:1px solid #202637; border-radius:8px; padding:6px 10px; display:flex; gap:8px; align-items:center; }
+    .dot { width:8px; height:8px; border-radius:999px; display:inline-block; }
+    .on{ background:var(--ok); box-shadow:0 0 0 2px rgba(34,197,94,.25); } .off{ background:#334155; }
+
+    /* Stream */
+    .stream-wrap { display:flex; flex-direction:column; gap:6px; min-height:0; }
+    .stream-controls { display:flex; align-items:center; gap:8px; }
+    .stream-box { flex:1; min-height:0; display:flex; align-items:center; justify-content:flex-start; overflow:auto; background:#0b0e14; position:relative; }
+    #stream { max-width:100%; height:auto; border-radius:8px; border:1px solid #2a3142; image-rendering:-webkit-optimize-contrast; }
+    .chips { display:flex; gap:6px; flex-wrap:nowrap; overflow:auto; }
+    .chip { display:inline-flex; gap:6px; align-items:center; padding:2px 8px; border:1px solid #2a3142; border-radius:999px; background:#0d1320; }
+
+    /* Fullscreen styles */
+    .fs-on body { overflow:hidden; }
+    .fs-host { position:relative; width:100%; height:100%; background:#000; }
+    .fs-img  { position:absolute; inset:0; margin:auto; width:94%; height:auto; border-radius:0; border:none; }
+    .fs-overlay {
+      position:absolute; left:0; right:0; bottom:0;
+      padding:10px 12px; background:linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,.35) 40%, rgba(0,0,0,.55) 100%);
+      display:flex; align-items:flex-end; justify-content:flex-start; pointer-events:none;
+    }
+    .fs-chips { pointer-events:auto; display:flex; gap:8px; flex-wrap:nowrap; overflow:auto; width:100%; }
+
+    /* Tabelle */
+    table { width:100%; border-collapse:collapse; border:1px solid #202637; border-radius:8px; overflow:hidden; table-layout:fixed; }
+    th, td { padding:6px 8px; border-bottom:1px solid #202637; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    th { background:#111520; text-align:left; position:sticky; top:0; z-index:1; }
+    tbody tr:hover { background:#0e1320; }
+    .num { text-align:right; }
+    .idrow.active { background: rgba(34,197,94,.08); }
+    .scroll { overflow:auto; }
+    .small { font-size:12px; }
+
+    /* Tooltip overlay (global, no clipping) */
+    #_tip {
+      position: fixed; z-index: 9999; display:none;
+      max-width: 260px; padding:6px 8px; font-size:12px; line-height:1.2;
+      background:#0b1220; color:#cbd5e1; border:1px solid #223050; border-radius:8px;
+      box-shadow: 0 6px 22px rgba(0,0,0,.45);
+      pointer-events: none;
+    }
+
+    @media (max-width:1100px){
+      body { overflow:auto; }
+      .layout { grid-template-columns: 1fr; grid-template-rows: auto auto auto auto auto auto; height:auto; }
+    }
+  </style>
+</head>
+<body>
+  <h1>MyDisplay Vision — Debug (Compact)</h1>
+
+  <!-- KPI -->
+  <div class="kpis" id="kpiBar">
+    <div class="kpi"><span class="dot off" id="camDot"></span><span id="camTxt">Cam</span></div>
+    <div class="kpi">FPS <strong id="kpiFps">—</strong></div>
+    <div class="kpi">Size <strong id="kpiSize">—</strong></div>
+    <div class="kpi">Uptime <strong id="kpiUptime">—</strong></div>
+    <div class="kpi">ReID mem <strong id="kpiMem">0</strong></div>
+    <div class="kpi">Active <strong id="kpiActive">0</strong></div>
+  </div>
+
+  <div class="layout">
+    <!-- COL1 ROW1: STREAM -->
+    <div class="card" id="cardStream">
+      <h2>Stream</h2>
+      <div class="stream-wrap">
+        <div class="stream-controls small">
+          <label class="muted">scale</label>
+          <select id="scaleSel">
+            <option value="0.25">25%</option><option value="0.4">40%</option>
+            <option value="0.5">50%</option><option value="0.75">75%</option>
+            <option value="1" selected>100%</option>
+          </select>
+          <button id="btnFs">fullscreen</button>
+          <span class="muted">doppio-click o tasto <b>F</b></span>
+          <span id="capInfo" class="muted"></span>
+        </div>
+        <div class="stream-box" id="streamBox">
+          <img id="stream" src="/debug/stream" alt="debug stream" />
+          <!-- overlay chips normale -->
+        </div>
+        <div class="chips small" id="activeChips"><span class="muted">active: —</span></div>
+      </div>
+    </div>
+
+    <!-- COL2 ROW1: ReID -->
+    <div class="card">
+      <h2>ReID Memory <span class="muted small" id="reidTs"></span></h2>
+      <div class="scroll" style="flex:1; min-height:0;">
+        <table>
+          <thead>
+            <tr>
+              <th class="th-tip" data-tip="Stato attivo nel frame corrente">on</th>
+              <th class="th-tip" data-tip="Identificatore globale (persistente)">#ID</th>
+              <th class="th-tip" data-tip="Numero aggiornamenti in memoria" style="text-align: right;">hits</th>
+              <th class="th-tip" data-tip="Secondi dalla creazione" style="text-align: right;">age (s)</th>
+              <th class="th-tip" data-tip="Secondi dall’ultimo avvistamento" style="text-align: right;">last (s)</th>
+            </tr>
+          </thead>
+          <tbody id="reidBody">
+            <tr><td colspan="5" class="muted">—</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- COL3 ROW1: METRICS -->
+    <div class="card">
+      <h2>Aggregati al minuto <span class="muted small" id="mTs"></span></h2>
+      <div class="row small" style="margin-bottom:6px;">
+        <label class="muted">last</label>
+        <select id="mLast"><option>5</option><option selected>10</option><option>20</option><option>50</option></select>
+        <span class="muted">include current</span><input type="checkbox" id="mCur" checked />
+      </div>
+      <div class="scroll" style="flex:1; min-height:0;">
+        <table>
+          <thead>
+            <tr>
+              <th class="th-tip" data-tip="Timestamp finestra (UTC)">ts</th>
+              <th class="th-tip" data-tip="Totale persone conteggiate nella finestra"  style="text-align: right;">tot</th>
+              <th class="th-tip" data-tip="Maschi"  style="text-align: right;">Male</th>
+              <th class="th-tip" data-tip="Femmine"  style="text-align: right;">Female</th>
+              <th class="th-tip" data-tip="Sesso non classificato"  style="text-align: right;">Unknown</th>
+              <th class="th-tip" data-tip="Bucket età (0-13,14-24,...,65+)">ageBuckets</th>
+            </tr>
+          </thead>
+          <tbody id="mBody">
+            <tr><td colspan="6" class="muted">—</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- COL1 ROW2: HEALTH/STATS -->
+    <div class="card">
+      <h2>Health & Stats</h2>
+      <div class="row small muted" style="margin-bottom:6px;"><button id="btnHs">refresh</button><span id="hsTs"></span></div>
+      <div class="row" style="gap:10px; min-height:0; flex:1;">
+        <div class="scroll" style="flex:1; min-height:0;">
+          <table><thead><tr><th colspan="2">/health</th></tr></thead><tbody id="tbHealth"></tbody></table>
+        </div>
+        <div class="scroll" style="flex:1; min-height:0;">
+          <table><thead><tr><th colspan="2">/stats</th></tr></thead><tbody id="tbStats"></tbody></table>
+        </div>
+      </div>
+    </div>
+
+    <!-- COL2–3 ROW2: CONFIG -->
+    <div class="card" style="grid-column: span 2;">
+      <h2>Config (rilevante)</h2>
+      <div class="row small muted" style="margin-bottom:6px;"><button id="btnCfg">reload</button><span id="cfgTs"></span></div>
+      <div class="scroll" style="flex:1; min-height:0;">
+        <table><thead><tr><th>chiave</th><th>valore</th></tr></thead><tbody id="tbCfg"></tbody></table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tooltip overlay -->
+  <div id="_tip"></div>
+
+  <!-- Fullscreen host (iniettato dinamicamente) -->
+  <template id="fsTpl">
+    <div class="fs-host" id="fsHost">
+      <img id="fsImg" class="fs-img" alt="stream" />
+      <div class="fs-overlay">
+        <div class="fs-chips small" id="activeChipsFs"></div>
+      </div>
+    </div>
+  </template>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const j = (v) => JSON.stringify(v);
+    const ts = () => new Date().toLocaleTimeString();
+    const fmtUptime = (sec) => { if (sec == null) return '—'; const h=Math.floor(sec/3600), m=Math.floor((sec%3600)/60), s=sec%60; return `${h}h ${m}m ${s}s`; };
+    const kvRows = (obj) => Object.entries(obj || {}).map(([k,v]) => `<tr><td class="muted">${k}</td><td>${(typeof v==='object')? j(v) : v}</td></tr>`).join('');
+
+    // STREAM scale
+    const stream = $('stream'), streamBox = $('streamBox'), scaleSel = $('scaleSel'), capInfo = $('capInfo');
+    scaleSel.onchange = () => { stream.style.transform = `scale(${parseFloat(scaleSel.value)})`; stream.style.transformOrigin='top left'; };
+    scaleSel.onchange();
+
+    // ---------- Fullscreen ----------
+    let fsOn = false, prevScale = '1';
+    const btnFs = $('btnFs');
+    const fsTpl = $('fsTpl');
+    let fsHost, fsImg;
+
+    function enterFs(){
+      if (fsOn) return;
+      prevScale = scaleSel.value;
+      // crea host
+      const node = fsTpl.content.cloneNode(true);
+      document.body.appendChild(node);
+      fsHost = $('fsHost'); fsImg = $('fsImg');
+      // punta allo stesso stream
+      fsImg.src = stream.src;
+      // richieste fullscreen
+      if (fsHost.requestFullscreen) fsHost.requestFullscreen();
+      // segna stato
+      fsOn = true;
+      // nascondi scaling (mostriamo l'immagine al naturale nel FS)
+      stream.style.transform = '';
+      // aggiorna chips overlay FS subito
+      renderActiveChips(lastActive, 'activeChipsFs');
+      // shortcut ESC handled by browser; ascolta per uscita
+      document.addEventListener('fullscreenchange', onFsChange);
+    }
+    function exitFs(){
+      if (!fsOn) return;
+      if (document.fullscreenElement) document.exitFullscreen();
+      // ripristina scala
+      scaleSel.value = prevScale; scaleSel.onchange();
+      // rimuovi host
+      if (fsHost && fsHost.parentNode) fsHost.parentNode.removeChild(fsHost);
+      fsHost = null; fsImg = null; fsOn = false;
+    }
+    function onFsChange(){
+      if (!document.fullscreenElement) exitFs();
+    }
+    btnFs.onclick = () => fsOn ? exitFs() : enterFs();
+    // doppio click sulla box, tasto 'f'
+    streamBox.ondblclick = enterFs;
+    document.addEventListener('keydown', (e)=>{ if (e.key.toLowerCase()==='f') enterFs(); });
+
+    // ---------- Tooltip manager ----------
+    (function tooltips(){
+      const tip = $('_tip');
+      function show(text, x, y){
+        tip.textContent = text;
+        tip.style.display = 'block';
+        const pad = 10, w = tip.offsetWidth, h = tip.offsetHeight;
+        let left = x + pad, top = y + pad;
+        if (left + w > window.innerWidth) left = x - w - pad;
+        if (top + h > window.innerHeight) top = y - h - pad;
+        tip.style.left = left + 'px'; tip.style.top = top + 'px';
+      }
+      function hide(){ tip.style.display = 'none'; }
+      document.addEventListener('mousemove', (e)=>{
+        const el = e.target.closest('.th-tip');
+        if (el && el.dataset.tip) { show(el.dataset.tip, e.clientX, e.clientY); }
+        else hide();
+      });
+      document.addEventListener('scroll', hide, true);
+      window.addEventListener('resize', hide);
+    })();
+
+    // ---------- Health & Stats ----------
+    async function refreshHealthStats() {
+      try {
+        const [h, s] = await Promise.all([fetch('/health').then(r=>r.json()), fetch('/stats').then(r=>r.json())]);
+        $('camDot').className = 'dot ' + (h.ok ? 'on' : 'off');
+        $('camTxt').textContent = h.camera;
+        $('kpiFps').textContent = (h.fps ?? '—');
+        $('kpiSize').textContent = Array.isArray(h.size) ? `${h.size[0]}×${h.size[1]}` : '—';
+        $('kpiUptime').textContent = fmtUptime(s.uptimeSec);
+        if (Array.isArray(h.size)) capInfo.textContent = `capture ${h.size[0]}×${h.size[1]} · fps≈${h.fps ?? '—'}`;
+        $('tbHealth').innerHTML = kvRows({ ok:h.ok, camera:h.camera, fps:h.fps, size:h.size?.join('×'), since:h.since, version:h.version });
+        $('tbStats').innerHTML  = kvRows({ framesTotal:s.framesTotal, lastUpdate:s.lastUpdate, lastFps:s.lastFps, cameraOk:s.cameraOk });
+        $('hsTs').textContent = 'aggiornato: ' + ts();
+      } catch (e) {
+        $('tbHealth').innerHTML = `<tr><td colspan="2" class="muted">errore /health</td></tr>`;
+        $('tbStats').innerHTML  = `<tr><td colspan="2" class="muted">errore /stats</td></tr>`;
+      }
+    }
+
+    // ---------- ReID ----------
+    let lastActive = {};
+    function renderActiveChips(active, targetId='activeChips'){
+      lastActive = active;
+      const ids = Object.keys(active).map(k=>parseInt(k,10)).sort((a,b)=>a-b);
+      const html = ids.length ? ids.map(id => `<span class="chip"><span class="dot on"></span>#${id}</span>`).join('') : '<span class="muted">active: —</span>';
+      $(targetId).innerHTML = html;
+      // replica sulle due barre (normale + FS se presente)
+      if (targetId==='activeChips' && $('activeChipsFs')) $('activeChipsFs').innerHTML = html;
+    }
+    async function refreshReID() {
+      try {
+        const data = await fetch('/debug/data').then(r => r.json());
+        const mem = Array.isArray(data.mem) ? data.mem : [];
+        const active = data.active || {};
+        const now = Date.now()/1000;
+        $('kpiMem').textContent = mem.length;
+        $('kpiActive').textContent = Object.keys(active).length;
+        renderActiveChips(active, 'activeChips');
+
+        const tb = $('reidBody');
+        if (!mem.length) { tb.innerHTML = '<tr><td colspan="5" class="muted">—</td></tr>'; }
+        else {
+          tb.innerHTML = mem.map(row => {
+            const id = row.id ?? row.rawId ?? row.gid ?? row.pid;
+            const on = !!active[id];
+            const lastAgo = row.last ? Math.max(0, (now - row.last)).toFixed(1) : '';
+            const age = row.ageSec != null ? Number(row.ageSec).toFixed(1) : '';
+            const hits = row.hits ?? '';
+            return `<tr class="idrow ${on?'active':''}">
+              <td><span class="dot ${on?'on':'off'}"></span></td>
+              <td>#${id}</td>
+              <td class="num">${hits}</td>
+              <td class="num">${age}</td>
+              <td class="num">${lastAgo}</td>
+            </tr>`;
+          }).join('');
+        }
+        $('reidTs').textContent = 'aggiornato: ' + ts();
+      } catch (e) { /* silent */ }
+    }
+
+    // ---------- Metrics ----------
+    function renderMetrics(arr) {
+      const tb = $('mBody');
+      if (!Array.isArray(arr) || !arr.length) { tb.innerHTML = '<tr><td colspan="6" class="muted">—</td></tr>'; return; }
+      tb.innerHTML = arr.map(r => {
+        const c = r.counts || {}; const ages = r.ageBuckets || {};
+        const ab = ['0-13','14-24','25-34','35-44','45-54','55-64','65+'].map(k => ages[k] ? `${k}:${ages[k]}` : '').filter(Boolean).join(' ');
+        return `<tr>
+          <td class="small">${(r.ts||'').replace('T',' ').replace('Z','')}</td>
+          <td class="num">${c.total ?? ''}</td>
+          <td class="num">${c.male ?? ''}</td>
+          <td class="num">${c.female ?? ''}</td>
+          <td class="num">${c.unknown ?? ''}</td>
+          <td class="small">${ab || (ages.unknown ? 'unknown:'+ages.unknown : '')}</td>
+        </tr>`;
+      }).join('');
+      $('mTs').textContent = 'aggiornato: ' + ts();
+    }
+    async function refreshMetrics() {
+      const last = parseInt($('mLast').value,10) || 10;
+      const includeCurrent = $('mCur').checked ? 1 : 0;
+      try { const arr = await fetch(`/metrics/minute?last=${last}&includeCurrent=${includeCurrent}`).then(r=>r.json()); renderMetrics(arr); }
+      catch { $('mBody').innerHTML = '<tr><td colspan="6" class="muted">errore /metrics/minute</td></tr>'; }
+    }
+
+    // ---------- Config ----------
+    const CFG_KEYS = ['tracker_max_age','tracker_min_hits','tracker_iou_th','reid_enabled','reid_similarity_th','reid_bank_size','reid_merge_sim','reid_prefer_oldest','count_dedup_ttl_sec','metrics_window_sec','cls_min_conf','cls_interval_ms','rtsp_transport','rtsp_max_failures'];
+    async function refreshConfig() {
+      try {
+        const cfg = await fetch('/config').then(r=>r.json());
+        $('tbCfg').innerHTML = CFG_KEYS.map(k => `<tr><td class="muted">${k}</td><td>${cfg[k] ?? ''}</td></tr>`).join('') || '<tr><td colspan="2" class="muted">—</td></tr>';
+        $('cfgTs').textContent = 'aggiornato: ' + ts();
+      } catch { $('tbCfg').innerHTML = '<tr><td colspan="2" class="muted">errore /config</td></tr>'; }
+    }
+
+    // Wiring
+    $('mLast').onchange = refreshMetrics;
+    $('mCur').onchange = refreshMetrics;
+    $('btnHs').onclick = refreshHealthStats;
+    $('btnCfg').onclick = refreshConfig;
+
+    // Init + polling
+    refreshHealthStats(); refreshReID(); refreshMetrics(); refreshConfig();
+    setInterval(refreshHealthStats, 2000);
+    setInterval(refreshReID, 2000);
+    setInterval(refreshMetrics, 5000);
+  </script>
+</body>
+</html>

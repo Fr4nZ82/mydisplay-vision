@@ -63,7 +63,11 @@ class MinuteAggregator:
             self._age_map.clear()
             # clean up retention
             cutoff = now - (self.retention_min * 60)
-            while self.windows and self.windows[0]["_epoch"] < cutoff:
+            while self.windows:
+                head = self.windows[0]
+                epoch = head.get("_epoch")   # <-- non crasherà se manca
+                if epoch is None or epoch >= cutoff:
+                    break
                 self.windows.popleft()
 
     def _flush_current_window(self):
@@ -111,12 +115,40 @@ class MinuteAggregator:
             self._age_map["unknown"] += 1
 
     def get_last(self, n: int = 10) -> List[Dict]:
-        # Return up to last n completed windows (not the in-progress one)
-        out = list(self.windows)[-n:] if n > 0 else list(self.windows)
-        # strip internal key
-        for w in out:
-            w.pop("_epoch", None)
-        return out
+      # Ritorna gli ultimi n window COMPLETATI (senza mutare l'originale)
+      src = list(self.windows)[-n:] if n > 0 else list(self.windows)
+      out: List[Dict] = []
+      for w in src:
+          wc = dict(w)             # <-- copia shallow del dict
+          wc.pop("_epoch", None)   # <-- rimuovi solo nella copia
+          out.append(wc)
+      return out
+    
+    def get_current(self) -> Optional[Dict]:
+        """Snapshot della finestra corrente (non finalizzata)."""
+        if self.current_win_start is None:
+            return None
+        ts_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(self.current_win_start))
+        payload = {
+            "ts": ts_iso,
+            "windowSec": self.window_sec,
+            "counts": {
+                "total": int(self._count_map.get("total", 0)),
+                "male": int(self._count_map.get("male", 0)),
+                "female": int(self._count_map.get("female", 0)),
+                "unknown": int(self._count_map.get("unknown", 0)),
+            },
+            "ageBuckets": {k: int(v) for k, v in sorted(self._age_map.items(), key=lambda kv: kv[0])},
+            "_epoch": int(self.current_win_start),
+            "_current": True,
+        }
+        for b in ["0-13","14-24","25-34","35-44","45-54","55-64","65+","unknown"]:
+            payload["ageBuckets"].setdefault(b, 0)
+        return payload
+
+    def tick(self, now: Optional[float] = None) -> None:
+        """Fa avanzare le finestre anche senza eventi."""
+        self._roll_window(time.time() if now is None else now)
 
     # ---- Tripwire check helpers ----
 

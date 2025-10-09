@@ -30,6 +30,13 @@ _DEFAULTS: Dict[str, Any] = {
     "api_host": "127.0.0.1",
     "api_port": 8080,
 
+    "rtsp_transport": "tcp",       # "tcp" o "udp"
+    "rtsp_buffer_frames": 2,       # buffer interno del demuxer (frame)
+    "rtsp_open_timeout_ms": 4000,  # timeout apertura
+    "rtsp_read_timeout_ms": 4000,  # timeout lettura
+    "rtsp_reconnect_sec": 2.0,     # attesa prima di riaprire
+    "rtsp_max_failures": 60,       # quante read fallite (50ms ciascuna) prima di riaprire
+
     # --- Face detector (YuNet) ---
     # Compat: se presente "yunet": { onnx_path, score_th, nms_th, top_k } verrà mappato qui.
     "detector_model": "models/face_detection_yunet_2023mar.onnx",
@@ -67,6 +74,19 @@ _DEFAULTS: Dict[str, Any] = {
     "roi_tripwire": [[0.1, 0.5], [0.9, 0.5]],  # linea normalizzata A->B
     "roi_direction": "both",                    # "both" | "a2b" | "b2a"
     "roi_band_px": 12,
+
+    # --- Re-Identification (facoltativo, usa YuNet landmarks + SFace) ---
+    "reid_enabled": True,
+    "reid_model_path": "models/face_recognition_sface_2021dec.onnx",
+    "reid_similarity_th": 0.365,   # ~ soglia tipica SFace cosine (regola in base ai test)
+    "reid_cache_size": 1000,       # max persone ricordate
+    "reid_memory_ttl_sec": 600,    # 10 minuti: mantieni l'associazione global_id
+    "reid_bank_size": 10,          # NUM descrittori per ID (feature bank)
+    "reid_merge_sim": 0.55,        # se un nuovo embedding è così simile a un ID esistente → alias merge
+    "reid_prefer_oldest": True,    # in caso di dubbio, tieni l'ID più vecchio
+
+    # --- Dedup conteggi (non riconteggiare stessa persona entro questo TTL) ---
+    "count_dedup_ttl_sec": 600,
 
     # --- Aggregazione / Metriche ---
     "metrics_window_sec": 60,

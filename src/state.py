@@ -10,8 +10,9 @@ Stato condiviso tra pipeline e API:
 from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any
+from typing import Dict, Any, List, Optional
 import threading
+import time
 
 
 @dataclass
@@ -44,6 +45,8 @@ class HealthState:
         # opzionali, usati dagli endpoint /metrics/minute e /config
         self._aggregator = None
         self._config_obj = None
+        self._reid_mem: List[Dict[str, Any]] = []
+        self._active_by_gid: Dict[int, Dict[str, Any]] = {}   # {gid: {tid, bbox, ts}}
 
     # --------- Health ---------
 
@@ -101,6 +104,37 @@ class HealthState:
         with self._lock:
             self._config_obj = cfg_obj
 
+    def set_reid_debug(self, items: List[Dict[str, Any]]):
+        """Salva uno snapshot della memoria ReID: [{'id', 'hits', 'last', 'created', 'ageSec'}, ...]"""
+        with self._lock:
+            self._reid_mem = items or []
+
+    def set_active_tracks(self, tracks: List[Dict[str, Any]]):
+        """
+        tracks: [{'gid': int, 'tid': int, 'bbox': [x,y,w,h]}]
+        """
+        now = time.time()
+        by_gid = {}
+        for t in tracks:
+            gid = int(t.get('gid'))
+            by_gid[gid] = {
+                'tid': int(t.get('tid')),
+                'bbox': list(map(int, t.get('bbox', [0,0,0,0]))),
+                'ts': now,
+            }
+        with self._lock:
+            self._active_by_gid = by_gid
+
+    def get_reid_debug(self) -> Dict[str, Any]:
+        """Ritorna snapshot per /debug/data"""
+        with self._lock:
+            return {
+                'mem': list(self._reid_mem),
+                'active': dict(self._active_by_gid),
+                'since': self._data.since,
+                'now': datetime.now(timezone.utc).isoformat(timespec="seconds")
+            }
+        
     def get_config(self):
         """
         Restituisce un dict serializzabile della configurazione, se disponibile.
@@ -131,6 +165,10 @@ class HealthState:
             "cls_min_face_px", "cls_min_conf", "cls_interval_ms",
             # tracker
             "tracker_max_age", "tracker_min_hits", "tracker_iou_th",
+             # reid
+            "reid_enabled", "reid_model_path", "reid_similarity_th",
+            "reid_cache_size", "reid_memory_ttl_sec",
+            "reid_bank_size", "reid_merge_sim", "reid_prefer_oldest",
             # roi / metrics
             "roi_tripwire", "roi_direction", "roi_band_px",
             "metrics_window_sec", "metrics_retention_min",

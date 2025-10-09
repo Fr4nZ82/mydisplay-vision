@@ -9,7 +9,7 @@
   "rtsp_read_timeout_ms": 4000,
   "rtsp_reconnect_sec": 2.0,
   "rtsp_max_failures": 60,
-
+  
   "debug_enabled": true,
   "debug_stream_fps": 5,
   "debug_resize_width": 960,
@@ -25,25 +25,6 @@
     "top_k": 5000
   },
 
-  "count_mode": "presence",
-  "presence_ttl_sec": 600,
-  "appearance_hist_bins": 24,
-  "appearance_min_area_px": 900,
-  "appearance_weight": 0.35,
-
-  "person_model_path": "models/yolov8n.onnx",
-  "person_img_size": 640,
-  "person_score_th": 0.25,
-  "person_iou_th": 0.45,
-  "person_max_det": 200,
-  "person_backend": 0,
-  "person_target": 0,
-  "detector_backend": 0,
-  "detector_target": 0,
-
-  "face_assoc_iou_th": 0.20,
-  "face_assoc_center_in": true,
-
   "age_model_path": "",
   "gender_model_path": "",
   "combined_model_path": "models/genderage.onnx",
@@ -58,7 +39,7 @@
   "cls_min_conf": 0.35,
   "cls_interval_ms": 300,
 
-  "tracker_max_age": 12,
+  "tracker_max_age": 40,
   "tracker_min_hits": 3,
   "tracker_iou_th": 0.35,
 
@@ -74,10 +55,6 @@
   "reid_bank_size": 10,
   "reid_merge_sim": 0.55,
   "reid_prefer_oldest": true,
-  "reid_app_only_th": 0.65,
-  "reid_app_similarity_th": 0.82,
-  "reid_face_gate": 0.42,
-  "reid_require_face_if_available": true,
   "count_dedup_ttl_sec": 600,
 
   "metrics_window_sec": 5,

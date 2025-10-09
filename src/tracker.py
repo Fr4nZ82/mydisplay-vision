@@ -18,8 +18,6 @@ Outputs: list of tracks dict:
 from __future__ import annotations
 from typing import List, Dict, Tuple, Optional
 from collections import deque, Counter
-import itertools
-import math
 
 def iou_xywh(a: List[float], b: List[float]) -> float:
     ax1, ay1, aw, ah = a

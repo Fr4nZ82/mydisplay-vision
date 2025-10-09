@@ -48,6 +48,7 @@ class MinuteAggregator:
         self._count_map = defaultdict(int)
         self._age_map = defaultdict(int)
         self._already_crossed = set()  # (track_id, dir_tag, win_start) to avoid duplicates
+        self._already_present = set()  # (global_id, win_start)
 
     def _roll_window(self, now: float):
         if self.current_win_start is None:
@@ -92,6 +93,29 @@ class MinuteAggregator:
         for b in ["0-13", "14-24", "25-34", "35-44", "45-54", "55-64", "65+", "unknown"]:
             payload["ageBuckets"].setdefault(b, 0)
         self.windows.append(payload)
+
+    def add_presence_event(self, gender: str, age_bucket: str, global_id: int, now: Optional[float] = None):
+        """
+        Conta una persona 'comparsa' (senza direzione).
+        Dedup nella stessa finestra.
+        """
+        now = time.time() if now is None else now
+        self._roll_window(now)
+        dedup_key = (int(global_id), int(self.current_win_start))
+        if dedup_key in self._already_present:
+            return
+        self._already_present.add(dedup_key)
+
+        self._count_map["total"] += 1
+        if gender in ("male", "female"):
+            self._count_map[gender] += 1
+        else:
+            self._count_map["unknown"] += 1
+
+        if age_bucket in ("0-13","14-24","25-34","35-44","45-54","55-64","65+"):
+            self._age_map[age_bucket] += 1
+        else:
+            self._age_map["unknown"] += 1
 
     def add_cross_event(self, gender: str, age_bucket: str, direction_tag: str, track_id: int, now: Optional[float] = None):
         now = time.time() if now is None else now

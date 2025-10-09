@@ -1,5 +1,6 @@
 ﻿# -*- coding: utf-8 -*-
 """
+src/config.py
 AppConfig
 ---------
 Carica config.json e fornisce attributi con default sensati.
@@ -36,6 +37,26 @@ _DEFAULTS: Dict[str, Any] = {
     "rtsp_read_timeout_ms": 4000,  # timeout lettura
     "rtsp_reconnect_sec": 2.0,     # attesa prima di riaprire
     "rtsp_max_failures": 60,       # quante read fallite (50ms ciascuna) prima di riaprire
+
+    # --- Counting mode ---
+    "count_mode": "presence",       # "presence" | "tripwire"
+    "presence_ttl_sec": 600,        # quanto tenere "vivo" un global id prima di contarlo (eviction)
+    "appearance_hist_bins": 24,     # dimensione istogramma HSV per firma vestiti/aspetto
+    "appearance_min_area_px": 900,  # ignora firme se il crop è troppo piccolo
+    "appearance_weight": 0.35,      # peso sim. aspetto nella fusione con sim. volto
+
+    # --- Person detector (primary tracking) ---
+    "person_model_path": "",       # es: "models/yolov8n.onnx"
+    "person_img_size": 640,
+    "person_score_th": 0.35,
+    "person_iou_th": 0.45,
+    "person_max_det": 200,
+    "person_backend": 0,           # OpenCV DNN backend id
+    "person_target": 0,            # OpenCV DNN target id
+
+    # Associazione volto->persona
+    "face_assoc_iou_th": 0.20,     # IoU minima per associare un volto a un bbox persona
+    "face_assoc_center_in": True,  # in alternativa/aggiunta: centro volto dentro bbox persona
 
     # --- Face detector (YuNet) ---
     # Compat: se presente "yunet": { onnx_path, score_th, nms_th, top_k } verrà mappato qui.
@@ -84,6 +105,9 @@ _DEFAULTS: Dict[str, Any] = {
     "reid_bank_size": 10,          # NUM descrittori per ID (feature bank)
     "reid_merge_sim": 0.55,        # se un nuovo embedding è così simile a un ID esistente → alias merge
     "reid_prefer_oldest": True,    # in caso di dubbio, tieni l'ID più vecchio
+    "reid_app_only_th": 0.65,
+    "reid_face_gate": 0.42,
+    "reid_require_face_if_available": True,
 
     # --- Dedup conteggi (non riconteggiare stessa persona entro questo TTL) ---
     "count_dedup_ttl_sec": 600,

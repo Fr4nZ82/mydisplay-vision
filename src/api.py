@@ -10,7 +10,7 @@ FastAPI app with:
 from __future__ import annotations
 
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, StreamingResponse, Response, JSONResponse, FileResponse
+from fastapi.responses import HTMLResponse, StreamingResponse, Response, JSONResponse
 from typing import Any, Optional
 from datetime import datetime, timezone
 from pathlib import Path

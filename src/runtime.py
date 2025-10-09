@@ -4,32 +4,30 @@ runtime.py
 -----------
 Loop della pipeline:
 capture → (resize debug) → detect (YuNet) → track (SORT-lite)
-→ classify (Age/Gender + cache) → tripwire (aggregator) → overlay → publish JPEG allo State.
+→ classify (Age/Gender + cache) → (tripwire opzionale) → overlay → publish JPEG allo State.
 
 Questo modulo NON avvia l'API: esegue solo la pipeline e aggiorna `HealthState`.
 """
 
 from __future__ import annotations
-
 import time
 import sys
-from typing import List, Tuple, Optional
-
+from typing import Optional
 import cv2
-import numpy as np
-
+from .utils_vis import (
+    resize_keep_aspect, draw_box_with_label,
+    draw_tripwire, associate_faces_to_tracks
+)
 from .state import HealthState
-from .utils_vis import resize_keep_aspect, draw_box_with_label
 from .tracker import SortLiteTracker
 from .age_gender import AgeGenderClassifier
 from .aggregator import MinuteAggregator
 from .face_detector import YuNetDetector
+from .person_detector import PersonDetector
 from .reid_memory import FaceReID
 
 
-
 # -------------------- Camera helpers --------------------
-
 def open_camera(index: int, width: int, height: int):
     """Prova MSMF, fallback DirectShow (come nel main originale)."""
     backends = [cv2.CAP_MSMF, cv2.CAP_DSHOW]
@@ -76,7 +74,6 @@ def open_rtsp(url: str, cfg):
     return cap
 
 # -------------------- Pipeline --------------------
-
 def run_pipeline(state: HealthState, cfg) -> None:
     """
     Esegue la pipeline finché il processo è vivo.
@@ -129,7 +126,7 @@ def run_pipeline(state: HealthState, cfg) -> None:
     roi_direction = getattr(cfg, "roi_direction", "both")
     roi_band_px = int(getattr(cfg, "roi_band_px", 12))
 
-    # --- Re-Identification (memoria facce) + dedup conteggio ---
+    # --- Re-Identification (memoria facce/aspetto) + dedup conteggio ---
     try:
         reid_enabled = bool(getattr(cfg, "reid_enabled", True))
         if reid_enabled:
@@ -149,7 +146,60 @@ def run_pipeline(state: HealthState, cfg) -> None:
         print(f"[WARN] ReID init failed: {e}")
         reid = FaceReID("", 1.0, 1, 1)
 
-    # mappa per dedup dei conteggi: global_id -> last_count_ts
+    # Parametri appearance (se il metodo non esiste ancora, salta)
+    if hasattr(reid, "set_appearance_params"):
+        try:
+            reid.set_appearance_params(
+                bins=int(getattr(cfg, "appearance_hist_bins", 24)),
+                min_area_px=int(getattr(cfg, "appearance_min_area_px", 900)),
+                weight=float(getattr(cfg, "appearance_weight", 0.35)),
+                app_th=float(getattr(cfg, "reid_app_similarity_th", 0.82)),
+            )
+            reid.set_id_policy(
+                appearance_weight=float(getattr(cfg, "appearance_weight", 0.35)),
+                app_only_min_th=float(getattr(cfg, "reid_app_only_th", 0.65)),
+                require_face_if_available=bool(getattr(cfg, "reid_require_face_if_available", True)),
+                face_gate=float(getattr(cfg, "reid_face_gate", max(getattr(cfg, "reid_similarity_th", 0.35), 0.42))),
+            )
+        except Exception:
+            pass
+
+    # Counting mode & eviction callback (fuori dal try di init reid)
+    count_mode = str(getattr(cfg, "count_mode", "presence")).lower()
+    presence_ttl = int(getattr(cfg, "presence_ttl_sec", getattr(cfg, "reid_memory_ttl_sec", 600)))
+    reid_ttl     = int(getattr(cfg, "reid_memory_ttl_sec", 600))
+
+    try:
+        reid.ttl = presence_ttl if count_mode == "presence" else reid_ttl
+    except Exception:
+        pass
+
+    def _on_evict(gid: int, meta: dict, last_ts: float):
+        if count_mode != "presence":
+            return
+        # scegli il genere prevalente e l'età prevalente se disponibili
+        try:
+            gh = meta.get('gender_hist', {}) or {}
+            ah = meta.get('age_hist', {}) or {}
+            gender = max(gh.items(), key=lambda kv: kv[1])[0] if gh else "unknown"
+            age_bucket = max(ah.items(), key=lambda kv: kv[1])[0] if ah else "unknown"
+        except Exception:
+            gender, age_bucket = "unknown", "unknown"
+        aggregator.add_presence_event(
+            gender=gender,
+            age_bucket=age_bucket,
+            global_id=gid,
+            now=last_ts
+        )
+
+    # collega la callback solo se l'attributo esiste
+    if hasattr(reid, "on_evict"):
+        try:
+            reid.on_evict = _on_evict
+        except Exception:
+            pass
+
+    # mappa per dedup dei conteggi: global_id -> last_count_ts (usata in modalità tripwire)
     from collections import OrderedDict
     count_seen = OrderedDict()
 
@@ -164,7 +214,7 @@ def run_pipeline(state: HealthState, cfg) -> None:
             while len(count_seen) > 4000:
                 count_seen.popitem(last=False)
         return True
-    
+
     # Detector (YuNet) come nel main originale
     detector = None
     try:
@@ -180,6 +230,27 @@ def run_pipeline(state: HealthState, cfg) -> None:
     except FileNotFoundError as e:
         print(f"[WARN] {e}\nProcedo senza detection: lo stream mostrerà solo la camera.")
 
+    # Detector persone (primary)
+    person_det = None
+    try:
+        p_model = getattr(cfg, "person_model_path", "")
+        if isinstance(p_model, str) and len(p_model.strip()) > 0:
+            person_det = PersonDetector(
+                model_path=p_model,
+                img_size=int(getattr(cfg, "person_img_size", 640)),
+                score_th=float(getattr(cfg, "person_score_th", 0.35)),
+                iou_th=float(getattr(cfg, "person_iou_th", 0.45)),
+                max_det=int(getattr(cfg, "person_max_det", 200)),
+                backend_id=int(getattr(cfg, "person_backend", 0)),
+                target_id=int(getattr(cfg, "person_target", 0)),
+            )
+            print("[OK] Person detector caricato.")
+        else:
+            print("[INFO] Person detector non configurato (fallback: tracking su volto).")
+    except Exception as e:
+        print(f"[WARN] Person detector init failed: {e}")
+        person_det = None
+
     # Apertura camera
     try:
         cam_cfg = getattr(cfg, "camera", 0)
@@ -191,7 +262,7 @@ def run_pipeline(state: HealthState, cfg) -> None:
             cap = open_camera(int(cam_cfg), getattr(cfg, "width", 1920), getattr(cfg, "height", 1080))
 
         if not cap or not cap.isOpened():
-          raise RuntimeError(f"Cannot open {'RTSP' if is_rtsp else 'camera'}: {cam_cfg}")
+            raise RuntimeError(f"Cannot open {'RTSP' if is_rtsp else 'camera'}: {cam_cfg}")
 
     except Exception as e:
         print(f"[FATAL] Impossibile aprire la camera: {e}")
@@ -217,24 +288,27 @@ def run_pipeline(state: HealthState, cfg) -> None:
         while True:
             ok, frame = cap.read()
             now = time.time()
-             # Avanza le finestre metriche anche senza eventi
+
+            # Avanza le finestre metriche anche senza eventi
             try:
                 aggregator.tick(now)
             except Exception:
                 pass
+
+            # (ri)leggi frame (alcune webcam/rtsp beneficiano del doppio read)
             ok, frame = cap.read()
             now = time.time()
 
             # init contatori fallimenti (una sola volta)
             if 'rtsp_fail_count' not in locals():
                 rtsp_fail_count = 0
-                rtsp_max_fail   = int(getattr(cfg, "rtsp_max_failures", 60))           # ~60*50ms = 3s
+                rtsp_max_fail   = int(getattr(cfg, "rtsp_max_failures", 60))  # ~60*50ms = 3s
                 rtsp_reconnect  = float(getattr(cfg, "rtsp_reconnect_sec", 2.0))
 
             if not ok or frame is None:
                 state.update(camera_ok=False, fps=0.0, width=0, height=0)
 
-                if is_rtsp:
+                if isinstance(getattr(cfg, "camera", 0), str) and str(getattr(cfg, "camera")).lower().startswith("rtsp://"):
                     rtsp_fail_count += 1
                     if rtsp_fail_count >= rtsp_max_fail:
                         try:
@@ -251,9 +325,8 @@ def run_pipeline(state: HealthState, cfg) -> None:
                 continue
             else:
                 # reset fallimenti su frame valido
-                if is_rtsp:
+                if isinstance(getattr(cfg, "camera", 0), str) and str(getattr(cfg, "camera")).lower().startswith("rtsp://"):
                     rtsp_fail_count = 0
-
 
             frame_count += 1
 
@@ -267,9 +340,7 @@ def run_pipeline(state: HealthState, cfg) -> None:
             if (now - last_report) >= 1.0:
                 h, w = frame.shape[:2]
                 fps = frame_count / (now - last_report)
-                print(
-                    f"[health] fps={fps:.1f} | size={w}x{h} | camera=OK | tracks={len(tracker.tracks)} | cls={'ON' if classifier.enabled else 'OFF'}"
-                )
+                print(f"[health] fps={fps:.1f} | size={w}x{h} | camera=OK | tracks={len(tracker.tracks)} | cls={'ON' if classifier.enabled else 'OFF'}")
                 state.update(camera_ok=True, fps=fps, width=w, height=h, frames_inc=frame_count)
                 frame_count = 0
                 last_report = now
@@ -280,30 +351,96 @@ def run_pipeline(state: HealthState, cfg) -> None:
                 vis = resize_keep_aspect(frame, getattr(cfg, "debug_resize_width", 960))
                 vh, vw = vis.shape[:2]
 
-                # Detection (YuNet su vis)
-                if detector is not None:
-                    dets_ori = detector.detect(vis)  # [((x,y,w,h), score), ...]
-                    detections = [[float(x), float(y), float(w), float(h), float(score)] for (x, y, w, h), score in dets_ori]
-                else:
-                    detections = []
+                # Detection persone (primary per tracking)
+                person_dets = []
+                if person_det is not None:
+                    try:
+                        person_dets = person_det.detect(vis)  # [((x,y,w,h),score), ...]
+                    except Exception:
+                        person_dets = []
 
-                # Tracking
+                # Detection volto (serve per età/genere e per arricchire ReID)
+                face_dets = []
+                if detector is not None:
+                    try:
+                        # Larghezza dedicata alla face detection (se 0 o >= vw, usa 'vis' senza ridurre)
+                        det_w = int(getattr(cfg, "detector_resize_width", 0) or 0)
+                        if det_w > 0 and det_w < vw:
+                            det_img = resize_keep_aspect(vis, det_w)
+                            s = det_img.shape[1] / float(vw)  # rapporto larghezza det_img/vis
+                        else:
+                            det_img = vis
+                            s = 1.0
+
+                        # YuNet sulla versione ridotta
+                        dets_ori = detector.detect(det_img)  # [((x,y,w,h), score), ...]
+
+                        # Rimappa le bbox al sistema di coordinate di 'vis'
+                        if s != 1.0:
+                            face_dets = [
+                                ((float(x)/s, float(y)/s, float(w)/s, float(h)/s), float(score))
+                                for (x, y, w, h), score in dets_ori
+                            ]
+                        else:
+                            face_dets = [
+                                ((float(x), float(y), float(w), float(h)), float(score))
+                                for (x, y, w, h), score in dets_ori
+                            ]
+                    except Exception:
+                        face_dets = []
+
+                # subito dopo aver settato person_dets e face_dets
+                if frame_count % int(max(1, 1*float(getattr(cfg, "debug_stream_fps", 5)))) == 0:
+                    print(f"[dbg] person_dets={len(person_dets)} face_dets={len(face_dets)}")
+
+                # Scegli input del tracker: persone se disponibili, altrimenti fallback ai volti
+                if person_dets:
+                    detections = [[bx, by, bw, bh, sc] for (bx, by, bw, bh), sc in person_dets]
+                else:
+                    detections = [[bx, by, bw, bh, sc] for (bx, by, bw, bh), sc in face_dets]
+
+                # Tracking (su persone o volti)
                 tracks = tracker.update(detections)
 
-                # Assegna un global_id (re-ID) ai track che non l'hanno ancora
+                # Associa volti ai track persona
+                face_assoc = associate_faces_to_tracks(
+                    face_dets, tracks,
+                    iou_th=float(getattr(cfg, "face_assoc_iou_th", 0.20)),
+                    use_center_in=bool(getattr(cfg, "face_assoc_center_in", True))
+                )
+
+
+                # Assegna/ReID
                 for t in tracks:
                     tid = t["track_id"]
-                    # se il tracker tiene stato per track:
                     tstate = tracker.tracks.get(tid, {})
+                    x, y, w, h = map(int, t["bbox"])
+                    person_crop = vis[max(0,y): y+h, max(0,x): x+w]
+                    matched_face = face_assoc.get(tid)
+
                     if "global_id" not in tstate:
-                        x, y, w, h = map(int, t["bbox"])
-                        face_roi_full = vis[max(0, y): y + h, max(0, x): x + w]
-                        # NB: SFace rende meglio con facce allineate; se non hai landmark, usa il crop grezzo
-                        # La classe FaceReID gestisce comunque il caso enabled=False senza errori
-                        gid = reid.assign_global_id(face_roi_full, None)
+                        if matched_face is not None:
+                            fx, fy, fw, fh = map(int, matched_face)
+                            face_crop = vis[max(0,fy): fy+fh, max(0,fx): fx+fw]
+                        else:
+                            face_crop = None
+                        # Usa persona come 'appearance', volto (se c'è) come face
+                        try:
+                            gid = reid.assign_global_id(
+                                face_bgr_crop=face_crop,
+                                kps5=None,
+                                appearance_bgr_crop=person_crop
+                            )
+                        except TypeError:
+                            # fallback vecchia firma
+                            gid = reid.assign_global_id(face_crop, None)
                         gid = reid.canon(gid)
                         tstate["global_id"] = gid
-                        tracker.tracks[tid] = tstate  # salva nello stato del tracker
+                        tstate["assigned_with_face"] = (matched_face is not None)
+
+                    # salva anche il face bbox corrente (per classificazione)
+                    tstate["face_bbox"] = matched_face  # None o (x,y,w,h)
+                    tracker.tracks[tid] = tstate
 
                 # --- BUILD SNAPSHOTS FOR DEBUG ---
                 # 1) Active tracks (per evidenziare in pagina gli ID visibili ora)
@@ -314,48 +451,96 @@ def run_pipeline(state: HealthState, cfg) -> None:
                     gid = tstate.get("global_id", tid)
                     x, y, w, h = map(int, t["bbox"])
                     active.append({'gid': int(gid), 'tid': int(tid), 'bbox': [x, y, w, h]})
-                state.set_active_tracks(active)
+                state.set_active_tracks(active)   # <-- passa la LISTA, non una mappa
 
-                # 2) ReID memory snapshot (lista ordinata per id)
+                # 2) ReID memory snapshot (lista ordinata per id, con meta estesi)
                 try:
                     mem_items = []
-                    # Se hai adottato la feature bank come da step precedente:
+                    now_s = time.time()
                     for pid, info in getattr(reid, 'mem', {}).items():
-                        canon = reid.canon(pid) if hasattr(reid, 'canon') else pid
-                        last = float(info.get('last', 0.0))
+                        canon   = reid.canon(pid) if hasattr(reid, 'canon') else pid
+                        last    = float(info.get('last', 0.0))
                         created = float(info.get('created', last))
+                        feats   = list(info.get('feats', []) or [])
+                        apps    = list(info.get('app', []) or [])
+                        meta    = info.get('meta', {}) or {}
+                        gh      = meta.get('gender_hist', {}) or {}
+                        ah      = meta.get('age_hist', {}) or {}
+                        genderMajor = max(gh.items(), key=lambda kv: kv[1])[0] if gh else "unknown"
+                        ageMajor    = max(ah.items(), key=lambda kv: kv[1])[0] if ah else "unknown"
+                        ttl = float(getattr(reid, 'ttl', 600.0) or 0.0)
+                        ttlRem = max(0.0, ttl - (now_s - last)) if ttl > 0 else None
+
                         mem_items.append({
                             'id': int(canon),
                             'rawId': int(pid),
                             'hits': int(info.get('hits', 1)),
                             'last': last,
                             'created': created,
-                            'ageSec': max(0, time.time() - created),
+                            'ageSec': max(0, now_s - created),
+                            'hasFace': len(feats) > 0,
+                            'hasSilhouette': len(apps) > 0,
+                            'faceCount': len(feats),
+                            'silCount': len(apps),
+                            'genderMajor': genderMajor,
+                            'ageMajor': ageMajor,
+                            'genderHist': gh,
+                            'ageHist': ah,
+                            'ttlRemSec': ttlRem,
                         })
-                    # Ordina per id (o per "last" se preferisci i più recenti in alto)
                     mem_items.sort(key=lambda r: r['id'])
                     state.set_reid_debug(mem_items)
                 except Exception:
-                    # snapshot opzionale: ignora eventuali errori
                     pass
-                
+
                 # Classificazione (cache ogni cls_interval_ms, solo se volto abbastanza grande)
                 for t in tracks:
-                    tid = t["track_id"]
-                    x, y, w, h = map(int, t["bbox"])
-                    if min(w, h) >= int(getattr(cfg, "cls_min_face_px", 64)):
-                        last_ts_t = last_cls_ts_per_track.get(tid, 0.0)
-                        if (now - last_ts_t) * 1000.0 >= cls_interval_ms:
-                            face_roi = vis[max(0, y): y + h, max(0, x): x + w]
-                            res = classifier.infer(face_roi)
-                            cls_cache_per_track[tid] = res
-                            last_cls_ts_per_track[tid] = now
-                    # smoothing nel tracker (anche se cache assente → unknown)
-                    cached = cls_cache_per_track.get(tid, {"gender": "unknown", "ageBucket": "unknown", "confidence": 0.0})
-                    tracker.apply_labels(tid, cached.get("gender", "unknown"), cached.get("ageBucket", "unknown"), cached.get("confidence", 0.0))
+                  tid = t["track_id"]
+                  tstate = tracker.tracks.get(tid, {})
+                  fb = tstate.get("face_bbox", None)
+                  if fb is None:
+                      # niente volto associato → mantieni le label correnti (unknown)
+                      cached = cls_cache_per_track.get(tid, {"gender": "unknown", "ageBucket": "unknown", "confidence": 0.0})
+                      tracker.apply_labels(tid, cached.get("gender", "unknown"), cached.get("ageBucket", "unknown"), cached.get("confidence", 0.0))
+                      continue
 
-                # Tripwire crossing
-                if isinstance(roi_tripwire, (list, tuple)) and len(roi_tripwire) == 2:
+                  fx, fy, fw, fh = map(int, fb)
+                  if min(fw, fh) >= int(getattr(cfg, "cls_min_face_px", 64)):
+                      last_ts_t = last_cls_ts_per_track.get(tid, 0.0)
+                      if (now - last_ts_t) * 1000.0 >= cls_interval_ms:
+                          face_roi = vis[max(0, fy): fy + fh, max(0, fx): fx + fw]
+                          res = classifier.infer(face_roi)
+                          # Se l'ID era stato assegnato senza volto, ora che il volto c'è riconsidera l'assegnazione
+                          try:
+                              if not tstate.get("assigned_with_face", False):
+                                  # prova a riassegnare usando volto + persona
+                                  new_gid = reid.assign_global_id(
+                                      face_bgr_crop=face_roi,
+                                      kps5=None,
+                                      appearance_bgr_crop=vis[max(0, t["bbox"][1]): t["bbox"][1]+t["bbox"][3], max(0, t["bbox"][0]): t["bbox"][0]+t["bbox"][2]]
+                                  )
+                                  new_gid = reid.canon(new_gid)
+                                  if new_gid != tstate.get("global_id", tid):
+                                      tstate["global_id"] = new_gid
+                                  tstate["assigned_with_face"] = True
+                                  tracker.tracks[tid] = tstate
+                          except Exception:
+                              pass
+                          cls_cache_per_track[tid] = res
+                          last_cls_ts_per_track[tid] = now
+                          # aggiorna meta del global id (se disponibile)
+                          try:
+                              gid = reid.canon(tstate.get("global_id", tid))
+                              if hasattr(reid, "update_meta"):
+                                  reid.update_meta(gid, res.get("gender","unknown"), res.get("ageBucket","unknown"))
+                          except Exception:
+                              pass
+                  cached = cls_cache_per_track.get(tid, {"gender": "unknown", "ageBucket": "unknown", "confidence": 0.0})
+                  tracker.apply_labels(tid, cached.get("gender", "unknown"), cached.get("ageBucket", "unknown"), cached.get("confidence", 0.0))
+
+
+                # Tripwire crossing (solo se count_mode == "tripwire")
+                if count_mode == "tripwire" and isinstance(roi_tripwire, (list, tuple)) and len(roi_tripwire) == 2:
                     for t in tracks:
                         tid = t["track_id"]
                         tb = t["bbox"]
@@ -387,30 +572,38 @@ def run_pipeline(state: HealthState, cfg) -> None:
                                         track_id=gid,
                                         now=now_ts,
                                     )
-                                # mantieni "viva" la memoria reid (touch)
+                                # mantieni "viva" la memoria reid (touch se disponibile)
                                 try:
-                                    reid.touch(gid, now_ts)
+                                    if hasattr(reid, "touch"):
+                                        reid.touch(gid, now_ts)
                                 except Exception:
                                     pass
                         # aggiorna prev_center dopo il check
                         tracker.update_prev_center(tid)
 
-                # Overlay (box + ID + gender/age/conf + tripwire)
-                if isinstance(roi_tripwire, (list, tuple)) and len(roi_tripwire) == 2:
-                    ax, ay = int(roi_tripwire[0][0] * vw), int(roi_tripwire[0][1] * vh)
-                    bx, by = int(roi_tripwire[1][0] * vw), int(roi_tripwire[1][1] * vh)
-                    cv2.line(vis, (ax, ay), (bx, by), (255, 0, 0), max(1, int(roi_band_px)))
+                if count_mode == "tripwire" and isinstance(roi_tripwire, (list, tuple)) and len(roi_tripwire) == 2:
+                  draw_tripwire(vis, (tuple(roi_tripwire[0]), tuple(roi_tripwire[1])), roi_band_px, (255,0,0))
 
                 for t in tracks:
                     tid = t["track_id"]
                     tstate = tracker.tracks.get(tid, {})
                     gid = tstate.get("global_id", tid)
 
+                    # box persona (cyan)
+                    px, py, pw, ph = map(int, t["bbox"])
+                    cv2.rectangle(vis, (px, py), (px+pw, py+ph), (255, 255, 0), 1)
+
+                    # face (lime) se presente
+                    fb = tstate.get("face_bbox", None)
+                    if fb is not None:
+                        fx, fy, fw, fh = map(int, fb)
+                        cv2.rectangle(vis, (fx, fy), (fx+fw, fy+fh), (0, 255, 0), 1)
+
                     g = t.get("gender", "unknown")
                     a = t.get("ageBucket", "unknown")
                     c = t.get("conf", 0.0)
                     lbl = f"#G{gid} {g[:1].upper() if g!='unknown' else '?'} / {a if a!='unknown' else '--'} ({c:.2f})"
-                    draw_box_with_label(vis, t["bbox"], lbl, (0, 180, 0))
+                    draw_box_with_label(vis, t["bbox"], lbl, (255, 255, 0))
 
                 # Pubblica JPEG allo state
                 ok_jpg, buf = cv2.imencode(".jpg", vis, [int(cv2.IMWRITE_JPEG_QUALITY), 80])

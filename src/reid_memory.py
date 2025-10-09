@@ -17,7 +17,6 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 from collections import OrderedDict
 import time
-import math
 
 import numpy as np
 import cv2
@@ -60,7 +59,18 @@ def _warp_face_bgr(img: np.ndarray, kps: np.ndarray, out_size=(112, 112)) -> Opt
         return None
     return cv2.warpAffine(img, M, out_size, flags=cv2.INTER_LINEAR, borderValue=0)
 
-
+def _appearance_signature(bgr: np.ndarray, bins: int = 24, min_area_px: int = 900) -> Optional[np.ndarray]:
+    if bgr is None or bgr.size == 0:
+        return None
+    h, w = bgr.shape[:2]
+    if h * w < max(1, int(min_area_px)):
+        return None
+    hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+    hist = cv2.calcHist([hsv], [0, 1], None, [bins, bins], [0, 180, 0, 256]).astype(np.float32)
+    hist = cv2.normalize(hist, None).reshape(-1)
+    # add simple geometric cues: aspect ratio and relative area (bounded)
+    ar = np.array([w / (h + 1e-6), (h * w) / 1e6], dtype=np.float32)  # scale area roughly
+    return _l2_normalize(np.concatenate([hist, ar], axis=0))
 class _BackendSFace:
     """
     Backend SFace basato su OpenCV contrib (FaceRecognizerSF).
@@ -83,7 +93,6 @@ class _BackendSFace:
             return _l2_normalize(f)
         except Exception:
             return None
-
 
 class _BackendArcFaceONNX:
     """
@@ -153,10 +162,25 @@ class FaceReID:
         self.bank_size = int(bank_size)
         self.merge_sim = float(merge_sim)
         self.prefer_oldest = bool(prefer_oldest)
+        # --- presence/appearance params (usati dal runtime e da assign_global_id) ---
+        self.on_evict = None                 # callable(gid:int, meta:dict, last_ts:float)
+        self.appearance_bins = 24
+        self.appearance_min_area_px = 900
+        self.appearance_weight = 0.35  # usato solo se volto + aspetto sono entrambi disponibili
+        self.require_face_if_available = True   # abilita la policy di gating corpo→solo-ID-con-volto
+        self.app_only_min_th = 0.82             # soglia più severa per match solo-aspetto
+        # soglia dedicata per matching SOLO aspetto (più severa)
+        self.app_th = 0.82
+        self.face_gate = max(self.sim_th, 0.42)  # soglia minima per dire che due facce sono la stessa persona
 
         self.enabled = True
         self.next_global_id = 1
-        # global_id -> {'feats': [np.ndarray,...], 'last': ts, 'created': ts, 'hits': int}
+        # global_id -> {
+        #   'feats': [face_embed,...],
+        #   'app': [appearance_sig,...],          # NEW
+        #   'last': ts, 'created': ts, 'hits': int,
+        #   'meta': {'gender_hist': Counter, 'age_hist': Counter}  # NEW
+        # }
         self.mem: "OrderedDict[int, Dict[str, Any]]" = OrderedDict()
         # alias map: nuovo_id -> id_canonico (vecchio)
         self.alias: Dict[int, int] = {}
@@ -186,14 +210,17 @@ class FaceReID:
     # ----------------- memoria & utilità -----------------
 
     def _prune(self, now_ts: float):
-        # rimuovi scaduti per TTL
         dead: List[int] = []
         for pid, info in self.mem.items():
             if now_ts - info['last'] > self.ttl:
                 dead.append(pid)
         for pid in dead:
-            self.mem.pop(pid, None)
+            info = self.mem.pop(pid, None)
             self.alias = {k: v for k, v in self.alias.items() if v != pid and k != pid}
+            # NEW: callback presenza
+            if info and callable(self.on_evict):
+                meta = info.get('meta', {})
+                self.on_evict(int(pid), meta, float(info.get('last', now_ts)))
 
         # limita la dimensione della cache
         overflow = len(self.mem) - self.cache_size
@@ -222,7 +249,7 @@ class FaceReID:
             elif sim > second[1]:
                 second = (pid, sim)
         # tie-break: se sim ~ uguali e prefer_oldest, scegli l'id più vecchio
-        if self.prefer_oldest and second[0] is not None:
+        if self.prefer_oldest and second[0] is not None and best_id is not None:
             if abs(best_sim - second[1]) <= 0.02 and second[0] < best_id:
                 best_id, best_sim, second = second[0], second[1], (best_id, best_sim)
         return best_id, best_sim, second
@@ -244,65 +271,132 @@ class FaceReID:
         while pid in self.alias:
             pid = self.alias[pid]
         return pid
+    
+    # --- setter usato dal runtime per configurare i parametri aspetto ---
+    def set_appearance_params(
+        self,
+        bins: int = 24,
+        min_area_px: int = 900,
+        weight: float = 0.35,
+        app_th: Optional[float] = None,   # compat: alias del vecchio nome
+    ):
+        self.appearance_bins = int(bins)
+        self.appearance_min_area_px = int(min_area_px)
+        self.appearance_weight = float(weight)
+        if app_th is not None:
+            # aggiorna ENTRAMBE, così la soglia ha effetto sul matching corrente
+            self.app_only_min_th = float(app_th)
+            self.app_th = float(app_th)
+
+
+    def set_id_policy(self, appearance_weight=None, app_only_min_th=None, require_face_if_available=None, face_gate=None):
+        if appearance_weight is not None:
+            self.appearance_weight = float(appearance_weight)
+        if app_only_min_th is not None:
+            self.app_only_min_th = float(app_only_min_th)
+        if require_face_if_available is not None:
+            self.require_face_if_available = bool(require_face_if_available)
+        if face_gate is not None:
+            self.face_gate = float(face_gate)
 
     # ----------------- API principale -----------------
 
-    def assign_global_id(self, face_bgr_crop: np.ndarray, kps5: Optional[np.ndarray] = None,
-                         now_ts: Optional[float] = None) -> int:
-        """
-        Ritorna un global_id stabile (se possibile). Se backend disabilitato, assegna ID nuovo.
-        - face_bgr_crop: crop del volto (BGR) — se kps5 disponibili, si tenta allineamento (SFace).
-        - kps5: landmarks 5-points (shape (5,2) in pixel) opzionali.
-        """
+    def assign_global_id(self, face_bgr_crop: Optional[np.ndarray], kps5: Optional[np.ndarray] = None, now_ts: Optional[float] = None, appearance_bgr_crop: Optional[np.ndarray] = None) -> int:
         now = time.time() if now_ts is None else now_ts
         self._prune(now)
 
-        if not self.enabled or self.backend is None:
+        # 1) estrai embedding volto (se possibile)
+        feat = None
+        if self.enabled and self.backend is not None and face_bgr_crop is not None:
+            face_for_feat = None
+            if self.backend_name == "sface" and kps5 is not None:
+                try:
+                    face_for_feat = _warp_face_bgr(face_bgr_crop, np.asarray(kps5, dtype=np.float32), (112,112))
+                except Exception:
+                    face_for_feat = None
+            if face_for_feat is None:
+                face_for_feat = face_bgr_crop
+            feat = self.backend.feat(face_for_feat)
+
+        # 2) firma di aspetto (vestiti)
+        app_sig = None
+        if appearance_bgr_crop is not None:
+            app_sig = _appearance_signature(
+                appearance_bgr_crop,
+                bins=self.appearance_bins,
+                min_area_px=self.appearance_min_area_px
+            )
+
+        # 3) nessun segnale → nuovo ID
+        if feat is None and app_sig is None:
             gid = self.next_global_id
             self.next_global_id += 1
+            self.mem[gid] = {'feats': [], 'app': [], 'last': now, 'created': now, 'hits': 1,
+                            'meta': {'gender_hist': {}, 'age_hist': {}}}
             return gid
 
-        # Se backend è SFace e ho landmarks: allinea a 112x112 per robustezza
-        face_for_feat = None
-        if self.backend_name == "sface" and kps5 is not None:
-            try:
-                face_for_feat = _warp_face_bgr(face_bgr_crop, np.asarray(kps5, dtype=np.float32), (112,112))
-            except Exception:
-                face_for_feat = None
+        # ---------- BRANCH A: con volto ----------
+        if feat is not None:
+            # best per volto (solo similitudini di volto)
+            best_id, best_sim, second = self._best_match(feat)
+            if best_id is not None and best_sim >= self.sim_th:
+                # assegna al best volto; aggiungi banche
+                pid = self.canon(best_id)
+                self._add_feat(pid, feat, now)
+                if app_sig is not None:
+                    self._add_app(pid, app_sig, now)
+                return pid
 
-        # fallback: usa il crop com'è (verrà resize dal backend ArcFace)
-        if face_for_feat is None:
-            face_for_feat = face_bgr_crop
+            # volto sotto soglia → fallback su aspetto SOLO verso ID già ancorati dal volto
+            if app_sig is not None:
+                best_app_id, best_app_sim = None, -1.0
+                for pid in self.mem.keys():
+                    # Se la policy è attiva, ignora ID che NON hanno mai avuto volto (evita "colla" corpo↔corpo)
+                    if self.require_face_if_available and len(self.mem[pid].get('feats', [])) == 0:
+                        continue
+                    s_app = self._sim_to_pid_app(pid, app_sig)
+                    if s_app > best_app_sim:
+                        best_app_id, best_app_sim = pid, s_app
+                if best_app_id is not None and best_app_sim >= self.app_only_min_th:
+                    pid = self.canon(best_app_id)
+                    # ora ancoriamo: aggiungo anche la faccia a questo ID
+                    self._add_feat(pid, feat, now)
+                    self._add_app(pid, app_sig, now)
+                    return pid
 
-        feat = self.backend.feat(face_for_feat)
-        if feat is None:
-            gid = self.next_global_id
+            # nessun match valido → nuovo ID
+            new_id = self.next_global_id
             self.next_global_id += 1
-            return gid
+            self.mem[new_id] = {'feats': [], 'app': [], 'last': now, 'created': now, 'hits': 1,
+                                'meta': {'gender_hist': {}, 'age_hist': {}}}
+            self._add_feat(new_id, feat, now)
+            if app_sig is not None:
+                self._add_app(new_id, app_sig, now)
+            return new_id
 
-        pid, sim, _ = self._best_match(feat)
-        if pid is not None and sim >= self.sim_th:
-            self._add_feat(pid, feat, now)
-            return self.canon(pid)
+        # ---------- BRANCH B: solo aspetto ----------
+        else:
+            best_app_id, best_app_sim = None, -1.0
+            for pid in self.mem.keys():
+                # SOLO match verso ID già ancorati dal volto (evita unioni corpo↔corpo)
+                if self.require_face_if_available and len(self.mem[pid].get('feats', [])) == 0:
+                    continue
+                s_app = self._sim_to_pid_app(pid, app_sig)
+                if s_app > best_app_sim:
+                    best_app_id, best_app_sim = pid, s_app
 
-        # Nessun match sopra soglia → crea nuovo id
-        new_id = self.next_global_id
-        self.next_global_id += 1
-        self.mem[new_id] = {'feats': [feat], 'last': now, 'created': now, 'hits': 1}
+            if best_app_id is not None and best_app_sim >= self.app_only_min_th:
+                pid = self.canon(best_app_id)
+                self._add_app(pid, app_sig, now)
+                return pid
 
-        # subito dopo la creazione, prova un MERGE con l'id migliore (anche se sotto sim_th)
-        best_pid, best_sim, _ = self._best_match(feat)
-        if best_pid is not None and best_pid != new_id and best_sim >= self.merge_sim:
-            # aliasa new → best (preferisci il più vecchio)
-            older = min(best_pid, new_id) if self.prefer_oldest else best_pid
-            newer = new_id if older == best_pid else best_pid
-            self.alias[newer] = older
-            # unisci feats nel più vecchio
-            for f in list(self.mem[newer]['feats']):
-                self._add_feat(older, f, now)
-            self.mem.pop(newer, None)
-            return self.canon(older)
-        return new_id
+            # altrimenti crea nuovo (ID nato da SOLO-corpo → NON aggiungo firma d'aspetto ora)
+            new_id = self.next_global_id
+            self.next_global_id += 1
+            self.mem[new_id] = {'feats': [], 'app': [], 'last': now, 'created': now, 'hits': 1,
+                                'meta': {'gender_hist': {}, 'age_hist': {}}}
+            # niente self._add_app(new_id, app_sig, now) qui: attendo di ancorarlo col volto
+            return new_id
 
     def touch(self, global_id: int, now_ts: Optional[float] = None):
         now = time.time() if now_ts is None else now_ts
@@ -311,3 +405,35 @@ class FaceReID:
         if info:
             info['last'] = now
             self.mem[pid] = info
+
+    def _add_app(self, pid: int, app_sig: np.ndarray, now: float):
+        info = self.mem.get(pid)
+        if not info:
+            return
+        bank = info.setdefault('app', [])
+        bank.append(app_sig)
+        if len(bank) > self.bank_size:
+            bank.pop(0)
+        info['last'] = now
+        info['hits'] += 1
+        self.mem[pid] = info
+
+    def _sim_to_pid_app(self, pid: int, sig: np.ndarray) -> float:
+        info = self.mem.get(pid)
+        if not info:
+            return -1.0
+        bank = info.get('app', [])
+        if not bank:
+            return -1.0
+        return max(_cosine_sim(f, sig) for f in bank)
+
+    def update_meta(self, pid: int, gender: str, age_bucket: str):
+        pid = self.canon(pid)
+        info = self.mem.get(pid)
+        if not info:
+            return
+        m = info.setdefault('meta', {'gender_hist': {}, 'age_hist': {}})
+        if gender:
+            m['gender_hist'][gender] = int(m['gender_hist'].get(gender, 0)) + 1
+        if age_bucket:
+            m['age_hist'][age_bucket] = int(m['age_hist'].get(age_bucket, 0)) + 1

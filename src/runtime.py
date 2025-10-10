@@ -26,6 +26,13 @@ from .face_detector import YuNetDetector
 from .person_detector import PersonDetector
 from .reid_memory import FaceReID
 from .body_reid import BodyReID
+import os
+
+try:
+    import onnxruntime as _ort  # noqa
+    _ORT_OK = True
+except Exception as _e:
+    _ORT_OK = False
 
 # -------------------- Camera helpers --------------------
 def open_camera(index: int, width: int, height: int):
@@ -99,6 +106,30 @@ def run_pipeline(state: HealthState, cfg) -> None:
         smooth_win=8,
         smooth_alpha=0.5,
     )
+
+    def _log_model_matrix(cfg):
+        def _row(label, path):
+            p = (path or "").strip()
+            if not p:
+                return f"  - {label:<22}: (vuoto)"
+            exists = os.path.exists(p)
+            size = os.path.getsize(p) if exists else 0
+            sz = f"{size/1024/1024:.1f} MB" if exists else "-"
+            return f"  - {label:<22}: {p}  [{'OK' if exists else 'MISSING'} | {sz}]"
+
+        print("[MODEL CHECK]")
+        print(_row("Face detector (YuNet)", getattr(cfg, "detector_model", "")))
+        print(_row("Person detector",       getattr(cfg, "person_model_path", "")))
+        print(_row("Age/Gender combined",   getattr(cfg, "combined_model_path", "")))
+        print(_row("Age model (sep)",       getattr(cfg, "age_model_path", "")))
+        print(_row("Gender model (sep)",    getattr(cfg, "gender_model_path", "")))
+        print(_row("Face ReID",             getattr(cfg, "reid_model_path", "")))
+        print(_row("Body ReID",             getattr(cfg, "body_reid_model_path", "")))
+        print(f"[ONNXRUNTIME] {'AVAILABLE' if _ORT_OK else 'NOT AVAILABLE'}")
+
+    _log_model_matrix(cfg)
+    if not _ORT_OK:
+        print("[WARN] ONNXRuntime non disponibile: i moduli ONNX (es. Age/Gender, ReID) potrebbero essere disattivati o fallire l’inizializzazione.")
 
     # Classifier (safe: se modelli mancanti → enabled False e unknown)
     classifier = AgeGenderClassifier(

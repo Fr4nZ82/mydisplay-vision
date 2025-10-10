@@ -29,9 +29,15 @@ from src.runtime import run_pipeline
 
 
 def _print_versions():
+    import platform
+    print(f"Python: {platform.python_version()} ({platform.architecture()[0]})")
     try:
         import onnxruntime as ort  # noqa
-        print(f"OpenCV: {cv2.__version__} | NumPy: {np.__version__} | ONNXRuntime: {ort.__version__}")
+        try:
+            dev = ort.get_device()
+        except Exception:
+            dev = "unknown"
+        print(f"OpenCV: {cv2.__version__} | NumPy: {np.__version__} | ONNXRuntime: {ort.__version__} ({dev})")
     except Exception as e:
         print(f"OpenCV: {cv2.__version__} | NumPy: {np.__version__} | ONNXRuntime: n/a ({e})")
 

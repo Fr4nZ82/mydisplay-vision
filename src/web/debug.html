@@ -8,42 +8,43 @@
     :root { color-scheme: dark; --bg:#0f1115; --card:#131722; --border:#1f2330; --muted:#94a3b8; --ok:#22c55e; }
     * { box-sizing: border-box; }
     html, body { height: 100%; }
-    body { margin:0; background:var(--bg); color:#e5e7eb; font:13px/1.35 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+    body { margin:0; background:var(--bg); color:#e5e7eb; font:13.5px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
 
     /* HEADER */
     .topbar{
       position: sticky; top:0; z-index:10;
       display:flex; align-items:center; justify-content:space-between; gap:10px;
       padding:10px 14px; background:linear-gradient(180deg,#0f1115,rgba(15,17,21,.85));
-      border-bottom:1px solid #131826;
-      backdrop-filter: blur(6px);
+      border-bottom:1px solid #131826; backdrop-filter: blur(6px);
     }
     .title{ font-size:18px; font-weight:700; margin:0; }
     .actions{ display:flex; gap:8px; align-items:center; }
     button{ background:#0d1320; color:#e5e7eb; border:1px solid #2a3142; border-radius:8px; padding:6px 10px; cursor:pointer; }
     button:hover{ background:#0f1728; }
+    .muted{ color:var(--muted); }
+    .small{ font-size:12px; }
 
     /* KPI */
     .kpis { display:flex; gap:10px; flex-wrap:wrap; padding: 0 14px 10px; }
     .kpi { background:#0d1320; border:1px solid #202637; border-radius:8px; padding:6px 10px; display:flex; gap:8px; align-items:center; }
     .dot { width:8px; height:8px; border-radius:999px; display:inline-block; }
     .on{ background:var(--ok); box-shadow:0 0 0 2px rgba(34,197,94,.25); } .off{ background:#334155; }
-    .muted{ color:var(--muted); }
-    .small{ font-size:12px; }
 
     /* LAYOUT */
-    .layout{
-      padding: 0 14px 14px;
+    .wrap { padding: 0 14px 14px; display:flex; flex-direction:column; gap:12px; }
+    /* Stream full-width, poi una griglia che si adatta */
+    #cardStream{ background:var(--card); border:1px solid var(--border); border-radius:10px; padding:10px; }
+    .grid{
       display:grid;
-      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
       gap:12px;
-      min-height: 0;
+      grid-auto-flow: dense;           /* riempi buchi */
+      align-items: stretch;
     }
     .card{ background:var(--card); border:1px solid var(--border); border-radius:10px; padding:10px; display:flex; flex-direction:column; min-height:0; }
     .card h2{ margin:0 0 8px; font-size:14px; font-weight:700; display:flex; align-items:center; gap:8px; }
 
-    /* STREAM A TUTTA LARGHEZZA SOPRA */
-    #cardStream{ grid-column: 1 / -1; }
+    /* STREAM */
     .stream-wrap{ display:flex; flex-direction:column; gap:6px; min-height:0; }
     .stream-controls{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
     .stream-box{ flex:1; min-height:0; display:flex; align-items:center; justify-content:center; overflow:auto; background:#0b0e14; position:relative; border-radius:8px; border:1px solid #2a3142; }
@@ -52,61 +53,46 @@
     .chip{ display:inline-flex; gap:6px; align-items:center; padding:2px 8px; border:1px solid #2a3142; border-radius:999px; background:#0d1320; }
 
     /* Tabelle */
-    table { width:100%; border-collapse:collapse; border:1px solid #202637; border-radius:8px; overflow:hidden; table-layout:fixed; }
-    th, td { padding:6px 8px; border-bottom:1px solid #202637; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    th { background:#111520; text-align:left; position:sticky; top:0; z-index:1; }
-    tbody tr:hover { background:#0e1320; }
-    .num{ text-align:right; }
+    table { width:100%; border-collapse:collapse; border:1px solid #273043; border-radius:8px; overflow:hidden; table-layout:fixed; }
+    th, td { padding:8px 10px; border-bottom:1px solid #202637; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    th { background:#0f1526; color:#d8e1f7; text-align:left; position:sticky; top:0; z-index:1; }
+    tbody tr:nth-child(even) { background: #0d1320; }
+    tbody tr:hover { background:#121a2d; }
+    .num{ text-align:right; font-variant-numeric: tabular-nums; }
     .idrow.active{ background: rgba(34,197,94,.08); }
     .scroll{ overflow:auto; }
 
     /* ICONCINE */
-    .ico { display:inline-block; width:16px; height:16px; border-radius:4px; border:1px solid #2a3142; background:#0d1320; text-align:center; line-height:16px; font-size:11px; }
+    .ico { display:inline-block; width:16px; height:16px; border-radius:4px; border:1px solid #3a445a; background:#0f172a; text-align:center; line-height:16px; font-size:11px; }
     .ico.on  { background:#0f2a17; border-color:#1e3a2f; }
-    .ico.off { opacity:.45; }
-    .badge { display:inline-block; padding:1px 6px; border:1px solid #2a3142; border-radius:999px; background:#0d1320; }
+    .ico.off { opacity:.5; }
+    .badge { display:inline-block; padding:1px 6px; border:1px solid #39445a; border-radius:999px; background:#0f172a; }
 
     /* FULLSCREEN */
     .fs-host { position:fixed; inset:0; background:#000; z-index:9998; }
     .fs-img  { position:absolute; inset:0; margin:auto; width:96%; height:96%; object-fit:contain; border:none; }
-    .fs-overlay {
-      position:absolute; left:0; right:0; bottom:0;
-      padding:10px 12px; background:linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,.35) 40%, rgba(0,0,0,.55) 100%);
-      display:flex; align-items:flex-end; justify-content:flex-start; pointer-events:none;
-    }
+    .fs-overlay { position:absolute; left:0; right:0; bottom:0; padding:10px 12px; background:linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,.35) 40%, rgba(0,0,0,.55) 100%); display:flex; align-items:flex-end; justify-content:flex-start; pointer-events:none; }
     .fs-chips { pointer-events:auto; display:flex; gap:8px; flex-wrap:nowrap; overflow:auto; width:100%; }
 
     /* TOOLTIP */
-    #_tip {
-      position: fixed; z-index: 9999; display:none;
-      max-width: 260px; padding:6px 8px; font-size:12px; line-height:1.2;
-      background:#0b1220; color:#cbd5e1; border:1px solid #223050; border-radius:8px;
-      box-shadow: 0 6px 22px rgba(0,0,0,.45);
-      pointer-events: none;
-    }
+    #_tip { position: fixed; z-index: 9999; display:none; max-width: 260px; padding:6px 8px; font-size:12px; line-height:1.2; background:#0b1220; color:#cbd5e1; border:1px solid #223050; border-radius:8px; box-shadow: 0 6px 22px rgba(0,0,0,.45); pointer-events: none; }
 
     /* MODAL CONFIG */
     .modal{ position:fixed; inset:0; display:none; place-items:center; z-index:9999; }
     .modal.show{ display:grid; }
     .backdrop{ position:absolute; inset:0; background:rgba(0,0,0,.55); backdrop-filter: blur(2px); }
-    .dialog{
-      position:relative; width:min(960px, 96vw); height:min(70vh, 90vh);
-      background:var(--card); border:1px solid var(--border); border-radius:14px; padding:12px;
-      display:flex; flex-direction:column; gap:8px;
-      box-shadow: 0 20px 60px rgba(0,0,0,.6);
-    }
+    .dialog{ position:relative; width:min(960px, 96vw); height:min(70vh, 90vh); background:var(--card); border:1px solid var(--border); border-radius:14px; padding:12px; display:flex; flex-direction:column; gap:8px; box-shadow: 0 20px 60px rgba(0,0,0,.6); }
     .dialog .head{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
     .dialog .body{ flex:1; min-height:0; }
     .dialog .foot{ display:flex; justify-content:flex-end; gap:8px; }
 
-    /* RESPONSIVE DIMENSIONI STREAM */
-    /* Verticale: stream alto (70vh) */
-    @media (orientation: portrait){
-      .stream-box{ height: 70vh; }
-    }
-    /* Orizzontale: stream medio (52vh) per lasciare spazio alle card */
-    @media (orientation: landscape){
-      .stream-box{ height: 52vh; }
+    /* Dimensione stream: verticale più alto, orizzontale meno invasivo */
+    @media (orientation: portrait){ .stream-box{ height: 70vh; } }
+    @media (orientation: landscape){ .stream-box{ height: 44vh; } }
+
+    /* Breakpoint di sicurezza: sotto 800px, colonna singola comunque */
+    @media (max-width: 800px){
+      .grid{ grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -129,8 +115,8 @@
     <div class="kpi">Active <strong id="kpiActive">0</strong></div>
   </div>
 
-  <div class="layout">
-    <!-- STREAM FULL-WIDTH TOP -->
+  <div class="wrap">
+    <!-- STREAM FULL-WIDTH -->
     <div class="card" id="cardStream">
       <h2>Stream <span id="capInfo" class="muted"></span></h2>
       <div class="stream-wrap">
@@ -150,72 +136,75 @@
       </div>
     </div>
 
-    <!-- ReID -->
-    <div class="card">
-      <h2>ReID Memory <span class="muted small" id="reidTs"></span></h2>
-      <div class="scroll" style="flex:1; min-height:0;">
-        <table>
-          <thead>
-            <tr>
-              <th class="th-tip" data-tip="Stato attivo nel frame corrente">on</th>
-              <th class="th-tip" data-tip="Identificatore globale (persistente)">#ID</th>
-              <th class="th-tip" data-tip="Embedding corpo (Body ReID) presente">body</th>
-              <th class="th-tip" data-tip="Volto presente in memoria (embedding)">face</th>
-              <th class="th-tip" data-tip="Genere prevalente visto su questo ID">gender</th>
-              <th class="th-tip" data-tip="Età prevalente vista su questo ID">age</th>
-              <th class="th-tip" data-tip="Numero aggiornamenti" style="text-align:right;">hits</th>
-              <th class="th-tip" data-tip="Secondi dalla creazione" style="text-align:right;">age (s)</th>
-              <th class="th-tip" data-tip="Secondi dall’ultimo avvistamento" style="text-align:right;">last (s)</th>
-            </tr>
-          </thead>
-          <tbody id="reidBody">
-            <tr><td colspan="9" class="muted">—</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- METRICS -->
-    <div class="card">
-      <h2>Aggregati al minuto <span class="muted small" id="mTs"></span></h2>
-      <div class="small" style="display:flex; gap:10px; align-items:center; margin-bottom:6px;">
-        <label class="muted">last</label>
-        <select id="mLast"><option>5</option><option selected>10</option><option>20</option><option>50</option></select>
-        <span class="muted">include current</span><input type="checkbox" id="mCur" checked />
-      </div>
-      <div class="scroll" style="flex:1; min-height:0;">
-        <table>
-          <thead>
-            <tr>
-              <th class="th-tip" data-tip="Timestamp finestra (UTC)">ts</th>
-              <th class="th-tip" data-tip="Totale persone nella finestra"  style="text-align:right;">tot</th>
-              <th class="th-tip" data-tip="Maschi"  style="text-align:right;">Male</th>
-              <th class="th-tip" data-tip="Femmine"  style="text-align:right;">Female</th>
-              <th class="th-tip" data-tip="Sesso non classificato"  style="text-align:right;">Unknown</th>
-              <th class="th-tip" data-tip="Bucket età (0-13,14-24,...,65+)">ageBuckets</th>
-            </tr>
-          </thead>
-          <tbody id="mBody">
-            <tr><td colspan="6" class="muted">—</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- HEALTH/STATS -->
-    <div class="card">
-      <h2>Health & Stats</h2>
-      <div class="small muted" style="margin-bottom:6px; display:flex; gap:8px; align-items:center;">
-        <button id="btnHs">refresh</button><span id="hsTs"></span>
-      </div>
-      <div style="display:flex; gap:10px; min-height:0; flex:1;">
+    <!-- GRID DELLE CARD -->
+    <div class="grid" id="grid">
+      <!-- ReID: vuole tanto spazio -->
+      <section class="card" id="cardReid" data-min="900">
+        <h2>ReID Memory <span class="muted small" id="reidTs"></span></h2>
         <div class="scroll" style="flex:1; min-height:0;">
-          <table><thead><tr><th colspan="2">/health</th></tr></thead><tbody id="tbHealth"></tbody></table>
+          <table>
+            <thead>
+              <tr>
+                <th class="th-tip" data-tip="Stato attivo nel frame corrente">on</th>
+                <th class="th-tip" data-tip="Identificatore globale (persistente)">#ID</th>
+                <th class="th-tip" data-tip="Embedding corpo (Body ReID) presente">body</th>
+                <th class="th-tip" data-tip="Volto presente in memoria (embedding)">face</th>
+                <th class="th-tip" data-tip="Genere prevalente visto su questo ID">gender</th>
+                <th class="th-tip" data-tip="Età prevalente vista su questo ID">age</th>
+                <th class="th-tip" data-tip="Numero aggiornamenti" style="text-align:right;">hits</th>
+                <th class="th-tip" data-tip="Secondi dalla creazione" style="text-align:right;">age (s)</th>
+                <th class="th-tip" data-tip="Secondi dall’ultimo avvistamento" style="text-align:right;">last (s)</th>
+              </tr>
+            </thead>
+            <tbody id="reidBody">
+              <tr><td colspan="9" class="muted">—</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Aggregati: medio -->
+      <section class="card" id="cardMetrics" data-min="620">
+        <h2>Aggregati al minuto <span class="muted small" id="mTs"></span></h2>
+        <div class="small" style="display:flex; gap:10px; align-items:center; margin-bottom:6px;">
+          <label class="muted">last</label>
+          <select id="mLast"><option>5</option><option selected>10</option><option>20</option><option>50</option></select>
+          <span class="muted">include current</span><input type="checkbox" id="mCur" checked />
         </div>
         <div class="scroll" style="flex:1; min-height:0;">
-          <table><thead><tr><th colspan="2">/stats</th></tr></thead><tbody id="tbStats"></tbody></table>
+          <table>
+            <thead>
+              <tr>
+                <th class="th-tip" data-tip="Timestamp finestra (UTC)">ts</th>
+                <th class="th-tip" data-tip="Totale persone"  style="text-align:right;">tot</th>
+                <th class="th-tip" data-tip="Maschi"  style="text-align:right;">Male</th>
+                <th class="th-tip" data-tip="Femmine"  style="text-align:right;">Female</th>
+                <th class="th-tip" data-tip="Sesso non classificato"  style="text-align:right;">Unknown</th>
+                <th class="th-tip" data-tip="Bucket età (0-13,14-24,...,65+)">ageBuckets</th>
+              </tr>
+            </thead>
+            <tbody id="mBody">
+              <tr><td colspan="6" class="muted">—</td></tr>
+            </tbody>
+          </table>
         </div>
-      </div>
+      </section>
+
+      <!-- Health&Stats: compatto -->
+      <section class="card" id="cardHealth" data-min="420">
+        <h2>Health & Stats</h2>
+        <div class="small muted" style="margin-bottom:6px; display:flex; gap:8px; align-items:center;">
+          <button id="btnHs">refresh</button><span id="hsTs"></span>
+        </div>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; min-height:0; flex:1;">
+          <div class="scroll" style="min-height:0;">
+            <table><thead><tr><th colspan="2">/health</th></tr></thead><tbody id="tbHealth"></tbody></table>
+          </div>
+          <div class="scroll" style="min-height:0;">
+            <table><thead><tr><th colspan="2">/stats</th></tr></thead><tbody id="tbStats"></tbody></table>
+          </div>
+        </div>
+      </section>
     </div>
   </div>
 
@@ -447,31 +436,46 @@
     const cfgModal = $('cfgModal'), btnOpenCfg = $('btnOpenCfg'), btnCloseCfg = $('btnCloseCfg'), cfgBackdrop = $('cfgBackdrop');
     function openCfg(){ cfgModal.classList.add('show'); cfgModal.setAttribute('aria-hidden','false'); loadConfigIntoModal(); }
     function closeCfg(){ cfgModal.classList.remove('show'); cfgModal.setAttribute('aria-hidden','true'); }
-    btnOpenCfg.onclick = openCfg;
-    btnCloseCfg.onclick = closeCfg;
-    cfgBackdrop.onclick = closeCfg;
-    $('btnCfgReload').onclick = loadConfigIntoModal;
+    btnOpenCfg.onclick = openCfg; btnCloseCfg.onclick = closeCfg; cfgBackdrop.onclick = closeCfg; $('btnCfgReload').onclick = loadConfigIntoModal;
     document.addEventListener('keydown', (e)=>{ if(e.key==='Escape' && cfgModal.classList.contains('show')) closeCfg(); });
 
-    // ---------- Health tables placeholders (moved but still needed) ----------
-    // Create the tbody containers expected by refreshHealthStats
-    const hTbody = document.createElement('tbody'); hTbody.id = 'tbHealth';
-    const sTbody = document.createElement('tbody'); sTbody.id = 'tbStats';
-    // Inject into existing tables in Health & Stats
-    (() => {
-      const healthTable = document.querySelector('table thead tr th[colspan="2"]:contains("/health")');
-    })(); // noop, i tbody sono già in DOM in questa versione
+    // ---------- AUTO-SPAN GRID (card “chiede” spazio) ----------
+    const grid = $('grid');
+    function computeColMetrics(){
+      const cs = getComputedStyle(grid);
+      const colDef = cs.gridTemplateColumns;                  // e.g. "384px 384px 384px"
+      const cols = colDef.split(' ').length;
+      const gap = parseFloat(cs.gap) || 0;
+      // stima della larghezza colonna (prima entry)
+      const first = colDef.split(' ')[0];
+      const colW = parseFloat(first);                         // px
+      return { cols, colW, gap };
+    }
+    function autospan(){
+      const { cols, colW, gap } = computeColMetrics();
+      const items = grid.querySelectorAll('.card');
+      items.forEach(el=>{
+        const want = parseInt(el.dataset.min || '360', 10);
+        // quante colonne servono per raggiungere 'want'
+        const span = Math.min(cols, Math.max(1, Math.round( (want + gap) / (colW + gap) )));
+        el.style.gridColumn = `span ${span}`;
+      });
+    }
+    // osserva resize del container
+    const ro = new ResizeObserver(autospan);
+    ro.observe(grid);
+    window.addEventListener('resize', autospan);
 
-    // Wiring
-    $('mLast').onchange = refreshMetrics;
-    $('mCur').onchange = refreshMetrics;
-    $('btnHs').onclick = refreshHealthStats;
-
-    // Init + polling
-    refreshHealthStats(); refreshReID(); refreshMetrics();
-    setInterval(refreshHealthStats, 2000);
-    setInterval(refreshReID, 2000);
-    setInterval(refreshMetrics, 5000);
+    // ---------- Init + polling ----------
+    function init(){
+      autospan();
+      refreshHealthStats(); refreshReID(); refreshMetrics();
+      setInterval(refreshHealthStats, 2000);
+      setInterval(refreshReID, 2000);
+      setInterval(refreshMetrics, 5000);
+    }
+    // dopo primo layout
+    requestAnimationFrame(init);
   </script>
 </body>
 </html>

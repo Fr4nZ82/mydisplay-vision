@@ -8,7 +8,7 @@
     :root { color-scheme: dark; --bg:#0f1115; --card:#131722; --border:#1f2330; --muted:#94a3b8; --ok:#22c55e; }
     * { box-sizing: border-box; }
     html, body { height: 100%; }
-    body { margin:0; background:var(--bg); color:#e5e7eb; font:13.5px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+    body { margin:0; background:var(--bg); color:#e5e7eb; font:13.5px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; overflow: hidden; }
 
     /* HEADER */
     .topbar{
@@ -86,6 +86,44 @@
     .dialog .body{ flex:1; min-height:0; }
     .dialog .foot{ display:flex; justify-content:flex-end; gap:8px; }
 
+    /* wrapper principale a altezza fissa calcolata da JS */
+    :root{ --topbar-h: 0px; }
+
+    #main{
+      height: calc(100vh - var(--topbar-h));
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+    }
+
+    /* va bene anche static; l’importante è misurarla e sottrarla */
+    .topbar { position: static; }
+    .kpis   { margin-top: -4px; }   /* fine tuning */
+
+    /* stream: altezza fissa per non spingere giù la griglia */
+    .stream-box { height: 44vh; }          /* default landscape */
+    @media (orientation: portrait){
+      .stream-box { height: 70vh; }        /* verticale: stream più alto */
+    }
+
+    /* area griglia che NON scorre: occupa lo spazio rimanente */
+    #gridWrap { min-height: 0; overflow: hidden; }
+
+    /* la griglia riempie lo spazio, ma non scrolla: scrollano le card */
+    .grid {
+      height: 100%;
+      overflow: hidden;            /* niente scroll della griglia */
+    }
+
+    /* ogni card è una colonna flex: header auto, contenuto scroll */
+    .card { min-height: 0; display:flex; flex-direction:column; }
+    .card .scroll { flex: 1 1 auto; min-height: 0; overflow: auto; }
+
+    /* le due tabelle in Health&Stats devono poter scorrere ciascuna */
+    #cardHealth .scroll { max-height: 100%; }
+
+    /* opzionale: limite max alle card per evitare che righino oltre */
+    .card { max-height: 100%; }
+
     /* Dimensione stream: verticale più alto, orizzontale meno invasivo */
     @media (orientation: portrait){ .stream-box{ height: 70vh; } }
     @media (orientation: landscape){ .stream-box{ height: 44vh; } }
@@ -105,17 +143,17 @@
     </div>
   </div>
 
-  <!-- KPI -->
-  <div class="kpis" id="kpiBar">
-    <div class="kpi"><span class="dot off" id="camDot"></span><span id="camTxt">Cam</span></div>
-    <div class="kpi">FPS <strong id="kpiFps">—</strong></div>
-    <div class="kpi">Size <strong id="kpiSize">—</strong></div>
-    <div class="kpi">Uptime <strong id="kpiUptime">—</strong></div>
-    <div class="kpi">ReID mem <strong id="kpiMem">0</strong></div>
-    <div class="kpi">Active <strong id="kpiActive">0</strong></div>
-  </div>
+  <div id="main">
+    <!-- KPI -->
+    <div class="kpis" id="kpiBar">
+      <div class="kpi"><span class="dot off" id="camDot"></span><span id="camTxt">Cam</span></div>
+      <div class="kpi">FPS <strong id="kpiFps">—</strong></div>
+      <div class="kpi">Size <strong id="kpiSize">—</strong></div>
+      <div class="kpi">Uptime <strong id="kpiUptime">—</strong></div>
+      <div class="kpi">ReID mem <strong id="kpiMem">0</strong></div>
+      <div class="kpi">Active <strong id="kpiActive">0</strong></div>
+    </div>
 
-  <div class="wrap">
     <!-- STREAM FULL-WIDTH -->
     <div class="card" id="cardStream">
       <h2>Stream <span id="capInfo" class="muted"></span></h2>
@@ -136,77 +174,80 @@
       </div>
     </div>
 
-    <!-- GRID DELLE CARD -->
-    <div class="grid" id="grid">
-      <!-- ReID: vuole tanto spazio -->
-      <section class="card" id="cardReid" data-min="900">
-        <h2>ReID Memory <span class="muted small" id="reidTs"></span></h2>
-        <div class="scroll" style="flex:1; min-height:0;">
-          <table>
-            <thead>
-              <tr>
-                <th class="th-tip" data-tip="Stato attivo nel frame corrente">on</th>
-                <th class="th-tip" data-tip="Identificatore globale (persistente)">#ID</th>
-                <th class="th-tip" data-tip="Embedding corpo (Body ReID) presente">body</th>
-                <th class="th-tip" data-tip="Volto presente in memoria (embedding)">face</th>
-                <th class="th-tip" data-tip="Genere prevalente visto su questo ID">gender</th>
-                <th class="th-tip" data-tip="Età prevalente vista su questo ID">age</th>
-                <th class="th-tip" data-tip="Numero aggiornamenti" style="text-align:right;">hits</th>
-                <th class="th-tip" data-tip="Secondi dalla creazione" style="text-align:right;">age (s)</th>
-                <th class="th-tip" data-tip="Secondi dall’ultimo avvistamento" style="text-align:right;">last (s)</th>
-              </tr>
-            </thead>
-            <tbody id="reidBody">
-              <tr><td colspan="9" class="muted">—</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <!-- Aggregati: medio -->
-      <section class="card" id="cardMetrics" data-min="620">
-        <h2>Aggregati al minuto <span class="muted small" id="mTs"></span></h2>
-        <div class="small" style="display:flex; gap:10px; align-items:center; margin-bottom:6px;">
-          <label class="muted">last</label>
-          <select id="mLast"><option>5</option><option selected>10</option><option>20</option><option>50</option></select>
-          <span class="muted">include current</span><input type="checkbox" id="mCur" checked />
-        </div>
-        <div class="scroll" style="flex:1; min-height:0;">
-          <table>
-            <thead>
-              <tr>
-                <th class="th-tip" data-tip="Timestamp finestra (UTC)">ts</th>
-                <th class="th-tip" data-tip="Totale persone"  style="text-align:right;">tot</th>
-                <th class="th-tip" data-tip="Maschi"  style="text-align:right;">Male</th>
-                <th class="th-tip" data-tip="Femmine"  style="text-align:right;">Female</th>
-                <th class="th-tip" data-tip="Sesso non classificato"  style="text-align:right;">Unknown</th>
-                <th class="th-tip" data-tip="Bucket età (0-13,14-24,...,65+)">ageBuckets</th>
-              </tr>
-            </thead>
-            <tbody id="mBody">
-              <tr><td colspan="6" class="muted">—</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <!-- Health&Stats: compatto -->
-      <section class="card" id="cardHealth" data-min="420">
-        <h2>Health & Stats</h2>
-        <div class="small muted" style="margin-bottom:6px; display:flex; gap:8px; align-items:center;">
-          <button id="btnHs">refresh</button><span id="hsTs"></span>
-        </div>
-        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; min-height:0; flex:1;">
-          <div class="scroll" style="min-height:0;">
-            <table><thead><tr><th colspan="2">/health</th></tr></thead><tbody id="tbHealth"></tbody></table>
+    <!-- WRAP della griglia a altezza fissa -->
+    <div id="gridWrap">
+      <div class="grid" id="grid">
+        <!-- ReID: vuole tanto spazio -->
+        <section class="card" id="cardReid" data-min="900">
+          <h2>ReID Memory <span class="muted small" id="reidTs"></span></h2>
+          <div class="scroll" style="flex:1; min-height:0;">
+            <table>
+              <thead>
+                <tr>
+                  <th class="th-tip" data-tip="Stato attivo nel frame corrente">on</th>
+                  <th class="th-tip" data-tip="Identificatore globale (persistente)">#ID</th>
+                  <th class="th-tip" data-tip="Embedding corpo (Body ReID) presente">body</th>
+                  <th class="th-tip" data-tip="Volto presente in memoria (embedding)">face</th>
+                  <th class="th-tip" data-tip="Genere prevalente visto su questo ID">gender</th>
+                  <th class="th-tip" data-tip="Età prevalente vista su questo ID">age</th>
+                  <th class="th-tip" data-tip="Numero aggiornamenti" style="text-align:right;">hits</th>
+                  <th class="th-tip" data-tip="Secondi dalla creazione" style="text-align:right;">age (s)</th>
+                  <th class="th-tip" data-tip="Secondi dall’ultimo avvistamento" style="text-align:right;">last (s)</th>
+                </tr>
+              </thead>
+              <tbody id="reidBody">
+                <tr><td colspan="9" class="muted">—</td></tr>
+              </tbody>
+            </table>
           </div>
-          <div class="scroll" style="min-height:0;">
-            <table><thead><tr><th colspan="2">/stats</th></tr></thead><tbody id="tbStats"></tbody></table>
+        </section>
+
+        <!-- Aggregati: medio -->
+        <section class="card" id="cardMetrics" data-min="620">
+          <h2>Aggregati al minuto <span class="muted small" id="mTs"></span></h2>
+          <div class="small" style="display:flex; gap:10px; align-items:center; margin-bottom:6px;">
+            <label class="muted">last</label>
+            <select id="mLast"><option>5</option><option selected>10</option><option>20</option><option>50</option></select>
+            <span class="muted">include current</span><input type="checkbox" id="mCur" checked />
           </div>
-        </div>
-      </section>
+          <div class="scroll" style="flex:1; min-height:0;">
+            <table>
+              <thead>
+                <tr>
+                  <th class="th-tip" data-tip="Timestamp finestra (UTC)">ts</th>
+                  <th class="th-tip" data-tip="Totale persone"  style="text-align:right;">tot</th>
+                  <th class="th-tip" data-tip="Maschi"  style="text-align:right;">Male</th>
+                  <th class="th-tip" data-tip="Femmine"  style="text-align:right;">Female</th>
+                  <th class="th-tip" data-tip="Sesso non classificato"  style="text-align:right;">Unknown</th>
+                  <th class="th-tip" data-tip="Bucket età (0-13,14-24,...,65+)">ageBuckets</th>
+                </tr>
+              </thead>
+              <tbody id="mBody">
+                <tr><td colspan="6" class="muted">—</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Health&Stats: compatto -->
+        <section class="card" id="cardHealth" data-min="420">
+          <h2>Health & Stats</h2>
+          <div class="small muted" style="margin-bottom:6px; display:flex; gap:8px; align-items:center;">
+            <button id="btnHs">refresh</button><span id="hsTs"></span>
+          </div>
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; min-height:0; flex:1;">
+            <div class="scroll" style="min-height:0;">
+              <table><thead><tr><th colspan="2">/health</th></tr></thead><tbody id="tbHealth"></tbody></table>
+            </div>
+            <div class="scroll" style="min-height:0;">
+              <table><thead><tr><th colspan="2">/stats</th></tr></thead><tbody id="tbStats"></tbody></table>
+            </div>
+          </div>
+        </section>
+      </div>
     </div>
   </div>
+
 
   <!-- MODAL CONFIG -->
   <div class="modal" id="cfgModal" aria-hidden="true">
@@ -439,6 +480,15 @@
     btnOpenCfg.onclick = openCfg; btnCloseCfg.onclick = closeCfg; cfgBackdrop.onclick = closeCfg; $('btnCfgReload').onclick = loadConfigIntoModal;
     document.addEventListener('keydown', (e)=>{ if(e.key==='Escape' && cfgModal.classList.contains('show')) closeCfg(); });
 
+    // --- blocco altezza: niente scroll pagina, solo interni ---
+    function resizeMain(){
+      const top = document.querySelector('.topbar');
+      const h = top ? top.offsetHeight : 0;
+      document.documentElement.style.setProperty('--topbar-h', h + 'px');
+    }
+    window.addEventListener('resize', resizeMain);
+    window.addEventListener('orientationchange', resizeMain);
+    document.addEventListener('DOMContentLoaded', resizeMain);
     // ---------- AUTO-SPAN GRID (card “chiede” spazio) ----------
     const grid = $('grid');
     function computeColMetrics(){

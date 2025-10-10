@@ -13,6 +13,21 @@ __pycache__/
 # OS
 .DS_Store
 Thumbs.db
-/models
+
 /.continue
 /config.json
+
+# TUTTO ciò che è modello pesante
+/models/**/*.onnx
+/models/**/*.xml
+/models/**/*.bin
+/models/**/*.pt
+/models/**/*.pth
+/models/**/*.tflite
+/models/**/*.{zip,tar,tar.gz,7z}
+
+# Mantieni le directory e i file segnaposto/testo
+!models/**/
+!models/**/.gitkeep
+!models/**/README.md
+!models/manifest.json

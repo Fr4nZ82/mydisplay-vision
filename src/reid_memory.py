@@ -367,8 +367,8 @@ class FaceReID:
         # B) Altrimenti, prova corpo con gate sugli ID ancorati (face) se configurato
         if chosen is None and body_vec is not None:
             # filtra candidati se richiesto
-            cand_body = [(pid, fs, bs, asim, fused) for (pid, fs, bs, asim, fused) in cand
-                         if (not self.require_face_if_available) or _id_has_face(pid)]
+            cand_body = [(pid, fs, bs, fused) for (pid, fs, bs, fused) in cand
+                        if (not self.require_face_if_available) or _id_has_face(pid)]
             best_body = max(cand_body, key=lambda r: r[2]) if cand_body else None
             if best_body and best_body[2] >= self.body_only_th:
                 chosen = int(best_body[0])

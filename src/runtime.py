@@ -12,6 +12,7 @@ Questo modulo NON avvia l'API: esegue solo la pipeline e aggiorna `HealthState`.
 from __future__ import annotations
 import time
 import sys
+import os
 from typing import Optional
 import cv2
 from .utils_vis import (
@@ -26,7 +27,140 @@ from .face_detector import YuNetDetector
 from .person_detector import PersonDetector
 from .reid_memory import FaceReID
 from .body_reid import BodyReID
-import os
+from .model_resolver import resolve_all
+
+# == Helpers comuni ==
+def _pick_path(info: dict) -> str:
+    """Ritorna il path effettivo in base al kind (xml per openvino, onnx per onnx)."""
+    if not info or not info.get("exists"):
+        return ""
+    return info["xml"] if info["kind"] == "openvino" else info.get("onnx", "")
+
+def _row_auto(label: str, info: dict) -> str:
+    if not info.get("exists"):
+        return f"  - {label:<22}: (not found)"
+    kind = info["kind"].upper()
+    path = _pick_path(info)
+    try:
+        sz = os.path.getsize(path) / 1024 / 1024
+        szs = f"{sz:.1f} MB" + (" + bin" if info["kind"] == "openvino" else "")
+    except Exception:
+        szs = "-"
+    return f"  - {label:<22}: [{kind}] {path}  [OK | {szs}]"
+
+def _resolve_and_log_models() -> dict:
+    models = resolve_all("models")
+    print("[MODEL CHECK]")
+    print(_row_auto("Face detector", models["face"]))
+    print(_row_auto("Person detector", models["person"]))
+    print(_row_auto("Age/Gender", models["genderage"]))
+    print(_row_auto("Face ReID", models["reid_face"]))
+    print(_row_auto("Body ReID", models["reid_body"]))
+    try:
+        import onnxruntime as _ort  # noqa
+        print("[ONNXRUNTIME] AVAILABLE")
+    except Exception:
+        print("[ONNXRUNTIME] NOT AVAILABLE")
+    return models
+
+
+# == Init modulari ==
+
+def init_tracker(cfg):
+    return SortLiteTracker(
+        max_age=int(getattr(cfg, "tracker_max_age", 8)),
+        min_hits=int(getattr(cfg, "tracker_min_hits", 4)),
+        iou_th=float(getattr(cfg, "tracker_iou_th", 0.35)),
+        smooth_win=8,
+        smooth_alpha=0.5,
+    )
+
+def init_age_gender(cfg, models):
+    from .age_gender import AgeGenderClassifier
+    mp = ""
+    if models["genderage"]["exists"]:
+        mp = _pick_path(models["genderage"])
+    clsf = AgeGenderClassifier(
+        combined_model_path=mp,
+        combined_input_size=tuple(getattr(cfg, "combined_input_size", (62, 62))),
+        combined_bgr_input=bool(getattr(cfg, "combined_bgr_input", True)),
+        combined_scale01=bool(getattr(cfg, "combined_scale01", False)),
+        combined_age_scale=float(getattr(cfg, "combined_age_scale", 100.0)),
+        combined_gender_order=tuple(getattr(cfg, "combined_gender_order", ("female", "male"))),
+        age_buckets=tuple(getattr(cfg, "age_buckets", ("0-13","14-24","25-34","35-44","45-54","55-64","65+"))),
+        cls_min_face_px=int(getattr(cfg, "cls_min_face_px", 64)),
+        cls_min_conf=float(getattr(cfg, "cls_min_conf", 0.35)),
+    )
+    return clsf
+
+def init_face_detector(cfg, models):
+    # YuNet: ONNX only (per ora)
+    if models["face"]["exists"] and models["face"]["kind"] == "onnx":
+        return YuNetDetector(
+            model_path=_pick_path(models["face"]),
+            score_th=getattr(cfg, "detector_score_th", 0.8),
+            nms_iou=getattr(cfg, "detector_nms_iou", 0.3),
+            top_k=getattr(cfg, "detector_top_k", 5000),
+            backend_id=getattr(cfg, "detector_backend", 0),
+            target_id=getattr(cfg, "detector_target", 0),
+        )
+    if models["face"]["exists"] and models["face"]["kind"] == "openvino":
+        print("[INFO] Trovato face detector OpenVINO, ma non ancora supportato in YuNet → ignorato.")
+    else:
+        print("[INFO] Face detector non trovato.")
+    return None
+
+def init_person_detector(cfg, models):
+    # YOLO: ONNX only (per ora)
+    if models["person"]["exists"] and models["person"]["kind"] == "onnx":
+        return PersonDetector(
+            model_path=_pick_path(models["person"]),
+            img_size=int(getattr(cfg, "person_img_size", 640)),
+            score_th=float(getattr(cfg, "person_score_th", 0.26)),
+            iou_th=float(getattr(cfg, "person_iou_th", 0.45)),
+            max_det=int(getattr(cfg, "person_max_det", 200)),
+            backend_id=int(getattr(cfg, "person_backend", 0)),
+            target_id=int(getattr(cfg, "person_target", 0)),
+        )
+    if models["person"]["exists"] and models["person"]["kind"] == "openvino":
+        print("[INFO] Person detector OpenVINO trovato ma non ancora supportato → ignorato.")
+    else:
+        print("[INFO] Person detector non trovato.")
+    return None
+
+def init_face_reid(cfg, models):
+    # ArcFace/SFace: ONNX only
+    reid_enabled = bool(getattr(cfg, "reid_enabled", True))
+    if reid_enabled and models["reid_face"]["exists"] and models["reid_face"]["kind"] == "onnx":
+        reid = FaceReID(
+            model_path=_pick_path(models["reid_face"]),
+            similarity_th=float(getattr(cfg, "reid_similarity_th", 0.365)),
+            cache_size=int(getattr(cfg, "reid_cache_size", 1000)),
+            memory_ttl_sec=int(getattr(cfg, "reid_memory_ttl_sec", 600)),
+            bank_size=int(getattr(cfg, "reid_bank_size", 10)),
+        )
+    else:
+        if reid_enabled and models["reid_face"]["exists"] and models["reid_face"]["kind"] == "openvino":
+            print("[INFO] Face ReID OpenVINO trovato ma backend attuale richiede ONNX → ignorato.")
+        reid = FaceReID("", 1.0, 1, 1)
+    print(f"[OK] ReID enabled={getattr(reid,'enabled',False)}")
+    return reid
+
+def init_body_reid(cfg, models, reid):
+    if models["reid_body"]["exists"]:
+        mp = _pick_path(models["reid_body"])  # preferisce OpenVINO se presente
+        backend = BodyReID(
+            model_path=mp,
+            backend_id=int(getattr(cfg, "body_reid_backend", 0)),
+            target_id=int(getattr(cfg, "body_reid_target", 0)),
+            input_size=(int(getattr(cfg, "body_reid_input_w", 128)), int(getattr(cfg, "body_reid_input_h", 256))),
+        )
+        if hasattr(reid, "set_body_backend"):
+            reid.set_body_backend(backend)
+        print("[OK] Body ReID backend caricato.")
+        return backend
+    print("[INFO] Body ReID non trovato.")
+    return None
 
 try:
     import onnxruntime as _ort  # noqa
@@ -91,7 +225,7 @@ def run_pipeline(state: HealthState, cfg) -> None:
     # Salva config/aggregator nello state per gli endpoint nuovi (/config, /metrics/minute)
     state.set_config_obj(cfg)
 
-    # Aggregatore (con default se il campo manca)
+    # Aggregatore (metrics)
     aggregator = MinuteAggregator(
         window_sec=int(getattr(cfg, "metrics_window_sec", 60)),
         retention_min=int(getattr(cfg, "metrics_retention_min", 120)),
@@ -99,84 +233,23 @@ def run_pipeline(state: HealthState, cfg) -> None:
     state.set_aggregator(aggregator)
 
     # Tracker
-    tracker = SortLiteTracker(
-        max_age=int(getattr(cfg, "tracker_max_age", 8)),
-        min_hits=int(getattr(cfg, "tracker_min_hits", 4)),
-        iou_th=float(getattr(cfg, "tracker_iou_th", 0.35)),
-        smooth_win=8,
-        smooth_alpha=0.5,
-    )
+    tracker = init_tracker(cfg)
 
-    def _log_model_matrix(cfg):
-        def _row(label, path):
-            p = (path or "").strip()
-            if not p:
-                return f"  - {label:<22}: (vuoto)"
-            exists = os.path.exists(p)
-            size = os.path.getsize(p) if exists else 0
-            sz = f"{size/1024/1024:.1f} MB" if exists else "-"
-            return f"  - {label:<22}: {p}  [{'OK' if exists else 'MISSING'} | {sz}]"
-
-        print("[MODEL CHECK]")
-        print(_row("Face detector (YuNet)", getattr(cfg, "detector_model", "")))
-        print(_row("Person detector",       getattr(cfg, "person_model_path", "")))
-        print(_row("Age/Gender combined",   getattr(cfg, "combined_model_path", "")))
-        print(_row("Age model (sep)",       getattr(cfg, "age_model_path", "")))
-        print(_row("Gender model (sep)",    getattr(cfg, "gender_model_path", "")))
-        print(_row("Face ReID",             getattr(cfg, "reid_model_path", "")))
-        print(_row("Body ReID",             getattr(cfg, "body_reid_model_path", "")))
-        print(f"[ONNXRUNTIME] {'AVAILABLE' if _ORT_OK else 'NOT AVAILABLE'}")
-
-    _log_model_matrix(cfg)
+    # Risoluzione modelli + log
+    models = _resolve_and_log_models()
     if not _ORT_OK:
-        print("[WARN] ONNXRuntime non disponibile: i moduli ONNX (es. Age/Gender, ReID) potrebbero essere disattivati o fallire l’inizializzazione.")
+        print("[WARN] ONNXRuntime non disponibile: i moduli ONNX potrebbero non inizializzarsi.")
 
-    # Classifier (safe: se modelli mancanti → enabled False e unknown)
-    classifier = AgeGenderClassifier(
-        # separati (restano compatibili e opzionali)
-        age_model_path=getattr(cfg, "age_model_path", "models/age.onnx"),
-        gender_model_path=getattr(cfg, "gender_model_path", "models/gender.onnx"),
+    # Classifier Age/Gender (combined; preferisce OpenVINO se presente)
+    classifier = init_age_gender(cfg, models)
 
-        # COMBINATO (se presente lo usa in automatico)
-        combined_model_path=getattr(cfg, "combined_model_path", "models/age-gender-recognition-retail-0013.onnx"),
-        combined_input_size=tuple(getattr(cfg, "combined_input_size", (62, 62))),
-        combined_bgr_input=bool(getattr(cfg, "combined_bgr_input", True)),
-        combined_scale01=bool(getattr(cfg, "combined_scale01", False)),
-        combined_age_scale=float(getattr(cfg, "combined_age_scale", 100.0)),
-        combined_gender_order=tuple(getattr(cfg, "combined_gender_order", ("female", "male"))),
-
-        # comuni
-        age_buckets=tuple(getattr(cfg, "age_buckets", ("0-13","14-24","25-34","35-44","45-54","55-64","65+"))),
-        input_size=(224, 224),
-        cls_min_face_px=int(getattr(cfg, "cls_min_face_px", 64)),
-        cls_min_conf=float(getattr(cfg, "cls_min_conf", 0.35)),
-    )
-
-    # Tripwire config (normalizzato 0..1)
+    # Tripwire config
     roi_tripwire = getattr(cfg, "roi_tripwire", [[0.1, 0.5], [0.9, 0.5]])
     roi_direction = getattr(cfg, "roi_direction", "both")
     roi_band_px = int(getattr(cfg, "roi_band_px", 12))
 
-    # --- Re-Identification (memoria facce/aspetto) + dedup conteggio ---
-    try:
-        reid_enabled = bool(getattr(cfg, "reid_enabled", True))
-        if reid_enabled:
-            reid = FaceReID(
-                model_path=getattr(cfg, "reid_model_path", ""),
-                similarity_th=float(getattr(cfg, "reid_similarity_th", 0.365)),
-                cache_size=int(getattr(cfg, "reid_cache_size", 1000)),
-                memory_ttl_sec=int(getattr(cfg, "reid_memory_ttl_sec", 600)),
-                                bank_size=int(getattr(cfg, "reid_bank_size", 10)),
-
-            )
-        else:
-            reid = FaceReID("", 1.0, 1, 1)  # istanza "spenta" safe
-        print(f"[OK] ReID enabled={getattr(reid,'enabled',False)}")
-    except Exception as e:
-        print(f"[WARN] ReID init failed: {e}")
-        reid = FaceReID("", 1.0, 1, 1)
-
-    # Policy ReID: volto/corpo (niente appearance)
+    # Face ReID (memoria) + policy
+    reid = init_face_reid(cfg, models)
     try:
         reid.set_id_policy(
             require_face_if_available=bool(getattr(cfg, "reid_require_face_if_available", True)),
@@ -188,33 +261,13 @@ def run_pipeline(state: HealthState, cfg) -> None:
     except Exception:
         pass
 
-    
-    # NEW: Backend Body ReID opzionale (OSNet/Intel OMZ) – safe se non configurato o non disponibile
-    try:
-        body_model = getattr(cfg, "body_reid_model_path", "")
-        if BodyReID is not None and isinstance(body_model, str) and len(body_model.strip()) > 0:
-            body_backend = BodyReID(
-                model_path=body_model,
-                backend_id=int(getattr(cfg, "body_reid_backend", 0)),
-                target_id=int(getattr(cfg, "body_reid_target", 0)),
-                input_size=(
-                    int(getattr(cfg, "body_reid_input_w", 128)),
-                    int(getattr(cfg, "body_reid_input_h", 256)),
-                ),
-            )
-            if hasattr(reid, "set_body_backend"):
-                reid.set_body_backend(body_backend)
-            print("[OK] Body ReID backend caricato.")
-        else:
-            print("[INFO] Body ReID non configurato.")
-    except Exception as e:
-        print(f"[WARN] Body ReID init failed: {e}")
+    # Body ReID (collega al FaceReID se presente)
+    body_backend = init_body_reid(cfg, models, reid)
 
-    # Counting mode & eviction callback (fuori dal try di init reid)
+    # Dedup counting & eviction callback
     count_mode = str(getattr(cfg, "count_mode", "presence")).lower()
     presence_ttl = int(getattr(cfg, "presence_ttl_sec", getattr(cfg, "reid_memory_ttl_sec", 600)))
     reid_ttl     = int(getattr(cfg, "reid_memory_ttl_sec", 600))
-
     try:
         reid.ttl = presence_ttl if count_mode == "presence" else reid_ttl
     except Exception:
@@ -223,29 +276,22 @@ def run_pipeline(state: HealthState, cfg) -> None:
     def _on_evict(gid: int, meta: dict, last_ts: float):
         if count_mode != "presence":
             return
-        # scegli il genere prevalente e l'età prevalente se disponibili
         try:
-            gh = meta.get('gender_hist', {}) or {}
-            ah = meta.get('age_hist', {}) or {}
+            gh = (meta or {}).get('gender_hist', {}) or {}
+            ah = (meta or {}).get('age_hist', {}) or {}
             gender = max(gh.items(), key=lambda kv: kv[1])[0] if gh else "unknown"
             age_bucket = max(ah.items(), key=lambda kv: kv[1])[0] if ah else "unknown"
         except Exception:
             gender, age_bucket = "unknown", "unknown"
-        aggregator.add_presence_event(
-            gender=gender,
-            age_bucket=age_bucket,
-            global_id=gid,
-            now=last_ts
-        )
+        aggregator.add_presence_event(gender=gender, age_bucket=age_bucket, global_id=gid, now=last_ts)
 
-    # collega la callback solo se l'attributo esiste
     if hasattr(reid, "on_evict"):
         try:
             reid.on_evict = _on_evict
         except Exception:
             pass
-
-    # mappa per dedup dei conteggi: global_id -> last_count_ts (usata in modalità tripwire)
+    
+    # Dedup per i conteggi (tripwire): non riconteggiare lo stesso global_id entro TTL
     from collections import OrderedDict
     count_seen = OrderedDict()
 
@@ -261,41 +307,13 @@ def run_pipeline(state: HealthState, cfg) -> None:
                 count_seen.popitem(last=False)
         return True
 
-    # Detector (YuNet) come nel main originale
-    detector = None
-    try:
-        detector = YuNetDetector(
-            model_path=getattr(cfg, "detector_model", "models/face_detection_yunet_2023mar.onnx"),
-            score_th=getattr(cfg, "detector_score_th", 0.8),
-            nms_iou=getattr(cfg, "detector_nms_iou", 0.3),
-            top_k=getattr(cfg, "detector_top_k", 5000),
-            backend_id=getattr(cfg, "detector_backend", 0),
-            target_id=getattr(cfg, "detector_target", 0),
-        )
+    # Detector volti/persona
+    face_detector = init_face_detector(cfg, models)
+    if face_detector is not None:
         print("[OK] YuNet caricato.")
-    except FileNotFoundError as e:
-        print(f"[WARN] {e}\nProcedo senza detection: lo stream mostrerà solo la camera.")
-
-    # Detector persone (primary)
-    person_det = None
-    try:
-        p_model = getattr(cfg, "person_model_path", "")
-        if isinstance(p_model, str) and len(p_model.strip()) > 0:
-            person_det = PersonDetector(
-                model_path=p_model,
-                img_size=int(getattr(cfg, "person_img_size", 640)),
-                score_th=float(getattr(cfg, "person_score_th", 0.26)),
-                iou_th=float(getattr(cfg, "person_iou_th", 0.45)),
-                max_det=int(getattr(cfg, "person_max_det", 200)),
-                backend_id=int(getattr(cfg, "person_backend", 0)),
-                target_id=int(getattr(cfg, "person_target", 0)),
-            )
-            print("[OK] Person detector caricato.")
-        else:
-            print("[INFO] Person detector non configurato (fallback: tracking su volto).")
-    except Exception as e:
-        print(f"[WARN] Person detector init failed: {e}")
-        person_det = None
+    person_detector = init_person_detector(cfg, models)
+    if person_detector is not None:
+        print("[OK] Person detector caricato.")
 
     # Apertura camera
     try:
@@ -399,15 +417,15 @@ def run_pipeline(state: HealthState, cfg) -> None:
 
                 # Detection persone (primary per tracking)
                 person_dets = []
-                if person_det is not None:
+                if person_detector is not None:
                     try:
-                        person_dets = person_det.detect(vis)  # [((x,y,w,h),score), ...]
+                        person_dets = person_detector.detect(vis)  # [((x,y,w,h),score), ...]
                     except Exception:
                         person_dets = []
 
                 # Detection volto (serve per età/genere e per arricchire ReID)
                 face_dets = []
-                if detector is not None:
+                if face_detector is not None:
                     try:
                         # Larghezza dedicata alla face detection (se 0 o >= vw, usa 'vis' senza ridurre)
                         det_w = int(getattr(cfg, "detector_resize_width", 0) or 0)
@@ -419,7 +437,7 @@ def run_pipeline(state: HealthState, cfg) -> None:
                             s = 1.0
 
                         # YuNet sulla versione ridotta
-                        dets_ori = detector.detect(det_img)  # [((x,y,w,h), score), ...]
+                        dets_ori = face_detector.detect(det_img)  # [((x,y,w,h), score), ...]
 
                         # Rimappa le bbox al sistema di coordinate di 'vis'
                         if s != 1.0:

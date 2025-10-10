@@ -31,6 +31,10 @@ import cv2
 import numpy as np
 
 try:
+    from openvino.runtime import Core as _OVCore
+except Exception:
+    _OVCore = None
+try:
     import onnxruntime as ort
 except Exception:
     ort = None  # gestito in fallback
@@ -45,80 +49,67 @@ def _softmax(logits: np.ndarray) -> np.ndarray:
 class AgeGenderClassifier:
     def __init__(
         self,
-        age_model_path: str = "",
-        gender_model_path: str = "",
-        # ---- modello COMBINATO
         combined_model_path: str = "",
-        combined_input_size: Tuple[int, int] = (62, 62),  # Intel 0013 = 62x62, InsightFace = 96x96
-        combined_bgr_input: bool = True,   # Intel/InsightFace usano tipicamente BGR
-        combined_scale01: bool = False,    # False = lascia 0..255; True = scala a 0..1
-        combined_age_scale: float = 100.0, # Intel/InsightFace: età spesso normalizzata (x100)
-        combined_gender_order: Tuple[str, str] = ("female", "male"),  # ordine probabilità nel vettore a 2 classi
-        # ---- parametri comuni
+        model_path: str = "",  # <--- AGGIUNTO per compat
+        combined_input_size: Tuple[int, int] = (62, 62),
+        combined_bgr_input: bool = True,
+        combined_scale01: bool = False,
+        combined_age_scale: float = 100.0,
+        combined_gender_order: Tuple[str, str] = ("female", "male"),
         age_buckets: Tuple[str, ...] = ("0-13", "14-24", "25-34", "35-44", "45-54", "55-64", "65+"),
         input_size: Tuple[int, int] = (224, 224),
         cls_min_face_px: int = 64,
         cls_min_conf: float = 0.35,
     ) -> None:
 
-        self.age_model_path = age_model_path or ""
-        self.gender_model_path = gender_model_path or ""
-        self.combined_model_path = combined_model_path or ""
+        self._enabled = False
+        self._mode = "none"  # "onnx" | "openvino" | "none"
+        self._sess_combined = None
+        self._ov_compiled = None
+        self._ov_input = None
 
-        self.age_buckets = tuple(age_buckets)
-        self.input_w, self.input_h = input_size
-        self.cls_min_face_px = int(cls_min_face_px)
-        self.cls_min_conf = float(cls_min_conf)
-
-        # Combined preprocess params
+        # <<< INIZIALIZZA ATTRIBUTI USATI DAL PREPROCESS >>>
         self.c_input_w, self.c_input_h = map(int, combined_input_size)
         self.c_bgr = bool(combined_bgr_input)
         self.c_scale01 = bool(combined_scale01)
         self.c_age_scale = float(combined_age_scale)
         self.c_gender_order = tuple(combined_gender_order)
+        self.age_buckets = tuple(age_buckets)
+        self.cls_min_face_px = int(cls_min_face_px)
+        self.cls_min_conf = float(cls_min_conf)
+        self.input_w, self.input_h = map(int, input_size)  # per eventuale ramo "separate"
 
-        # Runtime
-        self._enabled = False
-        self._mode = "none"  # "combined" | "separate" | "none"
-        self._sess_combined = None
-        self._sess_age = None
-        self._sess_gender = None
+        # NOTA: usiamo SOLO il modello combinato.
+        mp = model_path or combined_model_path
+        if not mp or not os.path.exists(mp):
+            return
 
-        if ort is None:
-            return  # fallback automatico
-
-        so = ort.SessionOptions()
-        so.log_severity_level = 3
-        providers = ["CPUExecutionProvider"]
-
-        # Preferisci COMBINED se presente
-        if self.combined_model_path and os.path.exists(self.combined_model_path):
+        ext = os.path.splitext(mp)[1].lower()
+        if ext == ".onnx":
             try:
-                self._sess_combined = ort.InferenceSession(self.combined_model_path, so, providers=providers)
-                self._mode = "combined"
+                import onnxruntime as ort
+                so = ort.SessionOptions(); so.log_severity_level = 3
+                self._sess_combined = ort.InferenceSession(mp, so, providers=["CPUExecutionProvider"])
+                self._mode = "onnx"
                 self._enabled = True
                 return
             except Exception:
-                # tenta i separati
                 self._sess_combined = None
-                self._mode = "none"
 
-        # Se non c'è combined, prova SEPARATI
-        if (self.age_model_path and os.path.exists(self.age_model_path)) and \
-           (self.gender_model_path and os.path.exists(self.gender_model_path)):
+        if ext == ".xml" and _OVCore is not None:
             try:
-                self._sess_age = ort.InferenceSession(self.age_model_path, so, providers=providers)
-                self._sess_gender = ort.InferenceSession(self.gender_model_path, so, providers=providers)
-                self._mode = "separate"
+                core = _OVCore()
+                model = core.read_model(mp)  # .xml (carica .bin associato)
+                self._ov_compiled = core.compile_model(model, "CPU")
+                self._ov_input = self._ov_compiled.inputs[0]
+                self._mode = "openvino"
                 self._enabled = True
                 return
             except Exception:
-                self._sess_age = None
-                self._sess_gender = None
+                self._ov_compiled = None
+                self._ov_input = None
 
-        # nessun modello caricato
-        self._enabled = False
-        self._mode = "none"
+
 
     @property
     def enabled(self) -> bool:
@@ -186,14 +177,66 @@ class AgeGenderClassifier:
             return {"gender": "unknown", "ageBucket": "unknown", "confidence": 0.0, "ts": now}
 
         try:
-            if self._mode == "combined" and self._sess_combined is not None:
+            # --- ONNX combined ---
+            if self._mode == "onnx" and self._sess_combined is not None:
                 x = self._preprocess_combined(face_bgr)
                 if x is None:
-                    return {"gender": "unknown", "ageBucket": "unknown", "confidence": 0.0, "ts": now}
+                    return {"gender":"unknown","ageBucket":"unknown","confidence":0.0,"ts":now}
+                outs = self._sess_combined.run(None, { self._sess_combined.get_inputs()[0].name: x })
+                flat = [np.array(o).reshape(-1) for o in outs]
 
-                # Esegui inferenza
-                inputs = {self._sess_combined.get_inputs()[0].name: x}
-                outs = self._sess_combined.run(None, inputs)
+                age_val, gender_vec = None, None
+                if len(flat) == 1 and flat[0].size == 3:
+                    v = flat[0]; gender_vec, age_val = v[:2], float(v[2]) * self.c_age_scale
+                else:
+                    for v in flat:
+                        if v.size == 2: gender_vec = v
+                        elif v.size == 1: age_val = float(v[0]) * self.c_age_scale
+
+                if gender_vec is None or age_val is None:
+                    return {"gender":"unknown","ageBucket":"unknown","confidence":0.0,"ts":now}
+
+                probs = _softmax(gender_vec.astype(np.float32))
+                fem_idx = 0 if self.c_gender_order[0] == "female" else 1
+                male_idx = 1 - fem_idx
+                female_p, male_p = float(probs[fem_idx]), float(probs[male_idx])
+                gender = "male" if male_p >= female_p else "female"
+                g_conf = max(male_p, female_p)
+                if g_conf < self.cls_min_conf:
+                    gender = "unknown"
+                age_bucket = self._bucketize_age(float(age_val), self.age_buckets)
+                return {"gender":gender,"ageBucket":age_bucket,"confidence":float(g_conf),"ts":now}
+
+            # --- OpenVINO combined ---
+            if self._mode == "openvino" and self._ov_compiled is not None:
+                x = self._preprocess_combined(face_bgr)
+                if x is None:
+                    return {"gender":"unknown","ageBucket":"unknown","confidence":0.0,"ts":now}
+                res_map = self._ov_compiled([x])
+                flat = [np.array(res_map[out]).reshape(-1) for out in self._ov_compiled.outputs]
+
+                age_val, gender_vec = None, None
+                if len(flat) == 1 and flat[0].size == 3:
+                    v = flat[0]; gender_vec, age_val = v[:2], float(v[2]) * self.c_age_scale
+                else:
+                    for v in flat:
+                        if v.size == 2: gender_vec = v
+                        elif v.size == 1: age_val = float(v[0]) * self.c_age_scale
+
+                if gender_vec is None or age_val is None:
+                    return {"gender":"unknown","ageBucket":"unknown","confidence":0.0,"ts":now}
+
+                probs = _softmax(gender_vec.astype(np.float32))
+                fem_idx = 0 if self.c_gender_order[0] == "female" else 1
+                male_idx = 1 - fem_idx
+                female_p, male_p = float(probs[fem_idx]), float(probs[male_idx])
+                gender = "male" if male_p >= female_p else "female"
+                g_conf = max(male_p, female_p)
+                if g_conf < self.cls_min_conf:
+                    gender = "unknown"
+                age_bucket = self._bucketize_age(float(age_val), self.age_buckets)
+                return {"gender":gender,"ageBucket":age_bucket,"confidence":float(g_conf),"ts":now}
+
 
                 # Heuristics per OUTPUT:
                 # - Caso A (Intel): 2 uscite -> [age_norm scalar], [gender probs 2]

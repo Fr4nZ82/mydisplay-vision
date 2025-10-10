@@ -1,21 +1,24 @@
 ﻿# -*- coding: utf-8 -*-
 """
 src/config.py
-AppConfig
----------
-Carica config.json e fornisce attributi con default sensati.
-Compatibile col tuo main e con la nuova pipeline (tracker, tripwire, aggregator, age/gender, modello combinato).
+AppConfig (solo parametri, nessun path a modelli)
 
-NOTE:
-- Il tuo config.json attuale continua a funzionare senza modifiche.
-- Se è presente un blocco "yunet": { onnx_path, score_th, nms_th, top_k }, viene usato per valorizzare i campi detector_* se non già impostati.
+- Niente più percorsi a file modello.
+- Niente oggetti annidati (rimosso blocco "yunet").
+- I modelli verranno risolti automaticamente da runtime in base a:
+    models/
+      face/
+      person/
+      genderage/
+      reid_face/
+      reid_body/
+  con sottocartelle: openvino/ (xml+bin) e onnx/ (onnx).
 """
 
 from __future__ import annotations
 import json
 import os
 from typing import Any, Dict, List, Tuple
-
 
 _DEFAULTS: Dict[str, Any] = {
     # --- Camera / Stream / API ---
@@ -26,62 +29,57 @@ _DEFAULTS: Dict[str, Any] = {
 
     "debug_enabled": False,
     "debug_stream_fps": 5,
-    "debug_resize_width": 960,  # 0 = nessun resize, 960 consigliato per /debug
+    "debug_resize_width": 960,  # 0 = nessun resize
 
     "api_host": "127.0.0.1",
     "api_port": 8080,
 
-    "rtsp_transport": "tcp",       # "tcp" o "udp"
-    "rtsp_buffer_frames": 2,       # buffer interno del demuxer (frame)
-    "rtsp_open_timeout_ms": 4000,  # timeout apertura
-    "rtsp_read_timeout_ms": 4000,  # timeout lettura
-    "rtsp_reconnect_sec": 2.0,     # attesa prima di riaprire
-    "rtsp_max_failures": 60,       # quante read fallite (50ms ciascuna) prima di riaprire
+    # --- RTSP (se usi una IP cam) ---
+    "rtsp_transport": "tcp",        # "tcp" | "udp"
+    "rtsp_buffer_frames": 2,
+    "rtsp_open_timeout_ms": 4000,
+    "rtsp_read_timeout_ms": 4000,
+    "rtsp_reconnect_sec": 2.0,
+    "rtsp_max_failures": 60,
 
     # --- Counting mode ---
     "count_mode": "presence",       # "presence" | "tripwire"
-    "presence_ttl_sec": 600,        # quanto tenere "vivo" un global id prima di contarlo (eviction)
+    "presence_ttl_sec": 600,
 
-    # --- Person detector (primary tracking) ---
-    "person_model_path": "",       # es: "models/yolov8n.onnx"
+    # --- Person detector (solo parametri: il modello è auto) ---
     "person_img_size": 640,
     "person_score_th": 0.26,
     "person_iou_th": 0.45,
     "person_max_det": 200,
-    "person_backend": 0,           # OpenCV DNN backend id
-    "person_target": 0,            # OpenCV DNN target id
+    "person_backend": 0,            # OpenCV DNN backend id
+    "person_target": 0,             # OpenCV DNN target id
 
     # Associazione volto->persona
-    "face_assoc_iou_th": 0.20,     # IoU minima per associare un volto a un bbox persona
-    "face_assoc_center_in": True,  # in alternativa/aggiunta: centro volto dentro bbox persona
+    "face_assoc_iou_th": 0.20,
+    "face_assoc_center_in": True,
 
-    # --- Face detector (YuNet) ---
-    # Compat: se presente "yunet": { onnx_path, score_th, nms_th, top_k } verrà mappato qui.
-    "detector_model": "",
+    # --- Face detector (YuNet, solo parametri) ---
     "detector_score_th": 0.8,
     "detector_nms_iou": 0.3,
     "detector_top_k": 5000,
     "detector_backend": 0,
     "detector_target": 0,
-    "detector_resize_width": 640,  # opzionale: resize solo per il detector
+    "detector_resize_width": 640,
 
-    # --- Classifier: modelli SEPARATI (opzionali) ---
-    "age_model_path": "",
-    "gender_model_path": "",
-    "age_buckets": ["0-13", "14-24", "25-34", "35-44", "45-54", "55-64", "65+"],
-    "cls_min_face_px": 64,
-    "cls_min_conf": 0.35,
-    "cls_interval_ms": 300,
-
-    # --- Classifier: MODELLO COMBINATO (consigliato) ---
-    # Default tarati per Intel age-gender-recognition-retail-0013 (BGR 62x62, out: age/100 + prob[F,M])
-    # Se non esiste il file indicato, il classifier prova i modelli separati; se non ci sono neppure quelli -> fallback unknown.
-    "combined_model_path": "",
-    "combined_input_size": [96, 96],
+    # --- Classifier: MODELLO COMBINATO (age+gender) ---
+    # Default coerenti con Intel age-gender-recognition-retail-0013:
+    # input 62x62 BGR, output (age/100, prob[F,M])
+    "combined_input_size": [62, 62],
     "combined_bgr_input": True,
     "combined_scale01": False,
     "combined_age_scale": 100.0,
     "combined_gender_order": ["female", "male"],
+
+    # Soglie generali per il classifier
+    "age_buckets": ["0-13", "14-24", "25-34", "35-44", "45-54", "55-64", "65+"],
+    "cls_min_face_px": 64,
+    "cls_min_conf": 0.35,
+    "cls_interval_ms": 300,
 
     # --- Tracker ---
     "tracker_max_age": 8,
@@ -89,21 +87,19 @@ _DEFAULTS: Dict[str, Any] = {
     "tracker_iou_th": 0.35,
 
     # --- ROI / Tripwire ---
-    "roi_tripwire": [[0.1, 0.5], [0.9, 0.5]],  # linea normalizzata A->B
-    "roi_direction": "both",                    # "both" | "a2b" | "b2a"
+    "roi_tripwire": [[0.1, 0.5], [0.9, 0.5]],
+    "roi_direction": "both",        # "both" | "a2b" | "b2a"
     "roi_band_px": 12,
 
-    # --- Re-Identification (facoltativo, usa YuNet landmarks + SFace) ---
+    # --- Face Re-Identification ---
     "reid_enabled": True,
-    "reid_model_path": "",
-    "reid_similarity_th": 0.365,   # ~ soglia tipica SFace cosine (regola in base ai test)
-    "reid_cache_size": 1000,       # max persone ricordate
-    "reid_memory_ttl_sec": 600,    # 10 minuti: mantieni l'associazione global_id
-    "reid_bank_size": 10,          # NUM descrittori per ID (feature bank)
+    "reid_similarity_th": 0.365,
+    "reid_cache_size": 1000,
+    "reid_memory_ttl_sec": 600,
+    "reid_bank_size": 10,
     "reid_require_face_if_available": True,
 
-    # --- Body ReID (NUOVO) ---
-    "body_reid_model_path": "",
+    # --- Body ReID ---
     "body_reid_input_w": 128,
     "body_reid_input_h": 256,
     "body_reid_backend": 0,
@@ -111,10 +107,7 @@ _DEFAULTS: Dict[str, Any] = {
     "body_only_th": 0.80,
     "reid_allow_body_seed": True,
 
-    # --- Debug / Verbose ---
-    "debug_reid_verbose": False,
-
-    # --- Dedup conteggi (non riconteggiare stessa persona entro questo TTL) ---
+    # --- Dedup conteggi ---
     "count_dedup_ttl_sec": 600,
 
     # --- Aggregazione / Metriche ---
@@ -122,23 +115,11 @@ _DEFAULTS: Dict[str, Any] = {
     "metrics_retention_min": 120,
 }
 
-
 class AppConfig:
-    # Attributi valorizzati in load()
     def __init__(self, data: Dict[str, Any]) -> None:
-        # copia pulita
         d = dict(_DEFAULTS)
         d.update(data or {})
-
-        # Merge opzionale con blocco "yunet"
-        yunet = d.get("yunet")
-        if isinstance(yunet, dict):
-            d.setdefault("detector_model", yunet.get("onnx_path", d["detector_model"]))
-            d.setdefault("detector_score_th", yunet.get("score_th", d["detector_score_th"]))
-            d.setdefault("detector_nms_iou", yunet.get("nms_th", d["detector_nms_iou"]))
-            d.setdefault("detector_top_k", yunet.get("top_k", d["detector_top_k"]))
-
-        # Esponi come attributi
+        # Espone tutti i campi come attributi
         for k, v in d.items():
             setattr(self, k, v)
 
@@ -153,13 +134,9 @@ class AppConfig:
                 data = {}
         return AppConfig(data)
 
-    # Utile per /config (API read-only)
+    # Utile per esporre la config via API (/config)
     def to_dict(self) -> Dict[str, Any]:
         out: Dict[str, Any] = {}
         for k in _DEFAULTS.keys():
             out[k] = getattr(self, k, _DEFAULTS[k])
-        # includi anche "yunet" se presente nel file originale
-        if hasattr(self, "yunet"):
-            out["yunet"] = getattr(self, "yunet")
         return out
-

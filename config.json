@@ -1,5 +1,5 @@
 {
-  "camera": "rtsp://admin:admin@192.168.1.11:554/streamtype=0",
+  "camera": 0,
   "width": 1920,
   "height": 1080,
   "target_fps": 10.0,
@@ -21,7 +21,6 @@
   "tracker_min_hits": 4,
   "tracker_iou_th": 0.35,
 
-  "person_model_path": "models/yolov8n.onnx",
   "person_img_size": 640,
   "person_score_th": 0.26,
   "person_iou_th": 0.45,
@@ -29,7 +28,6 @@
   "person_backend": 0,
   "person_target": 0,
 
-  "detector_model": "models/face_detection_yunet_2023mar.onnx",
   "detector_score_th": 0.8,
   "detector_nms_iou": 0.3,
   "detector_top_k": 5000,
@@ -40,14 +38,11 @@
   "face_assoc_iou_th": 0.20,
   "face_assoc_center_in": true,
 
-  "age_model_path": "",
-  "gender_model_path": "",
   "age_buckets": ["0-13", "14-24", "25-34", "35-44", "45-54", "55-64", "65+"],
   "cls_min_face_px": 64,
   "cls_min_conf": 0.35,
   "cls_interval_ms": 300,
 
-  "combined_model_path": "models/genderage.onnx",
   "combined_input_size": [96, 96],
   "combined_bgr_input": true,
   "combined_scale01": false,
@@ -59,14 +54,12 @@
   "roi_band_px": 8,
 
   "reid_enabled": true,
-  "reid_model_path": "models/arcfaceresnet100-8.onnx",
   "reid_similarity_th": 0.365,
   "reid_cache_size": 1000,
   "reid_memory_ttl_sec": 600,
   "reid_bank_size": 10,
   "reid_require_face_if_available": true,
 
-  "body_reid_model_path": "models/osnet_x0_25_msmt17.onnx",
   "body_reid_input_w": 128,
   "body_reid_input_h": 256,
   "body_reid_backend": 0,

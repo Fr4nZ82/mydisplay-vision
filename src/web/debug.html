@@ -33,7 +33,11 @@
     /* LAYOUT */
     .wrap { padding: 0 14px 14px; display:flex; flex-direction:column; gap:12px; }
     /* Stream full-width, poi una griglia che si adatta */
-    #cardStream{ background:var(--card); border:1px solid var(--border); border-radius:10px; padding:10px; }
+    #cardStream{
+      background:var(--card); border:1px solid var(--border);
+      border-radius:10px; padding:10px;
+      display:flex; flex-direction:column; min-height:0;
+    }
     .grid{
       display:grid;
       grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -45,10 +49,16 @@
     .card h2{ margin:0 0 8px; font-size:14px; font-weight:700; display:flex; align-items:center; gap:8px; }
 
     /* STREAM */
-    .stream-wrap{ display:flex; flex-direction:column; gap:6px; min-height:0; }
-    .stream-controls{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-    .stream-box{ flex:1; min-height:0; display:flex; align-items:center; justify-content:center; overflow:auto; background:#0b0e14; position:relative; border-radius:8px; border:1px solid #2a3142; }
-    #stream{ width:100%; height:100%; object-fit:contain; border-radius:8px; image-rendering:-webkit-optimize-contrast; }
+    .stream-wrap{ display:flex; flex-direction:column; gap:6px; min-height:0; height:100%; }
+    .stream-controls{ flex:0 0 auto; }
+    .stream-box{
+      flex:1 1 auto;
+      min-height:0;
+      display:flex; align-items:center; justify-content:center;
+      overflow:auto; background:#0b0e14; position:relative;
+      border-radius:8px; border:1px solid #2a3142;
+    }
+    #stream{ width:100%; height:100%; object-fit:contain; border-radius:8px; }
     .chips{ display:flex; gap:6px; flex-wrap:nowrap; overflow:auto; }
     .chip{ display:inline-flex; gap:6px; align-items:center; padding:2px 8px; border:1px solid #2a3142; border-radius:999px; background:#0d1320; }
 
@@ -89,21 +99,24 @@
     /* wrapper principale a altezza fissa calcolata da JS */
     :root{ --topbar-h: 0px; }
 
+    /* Altezza riga Stream controllata da variabile */
+    :root{
+      --stream-h: 44vh;            /* default (landscape) ~ 1/4-1/3 schermo */
+    }
+    @media (orientation: portrait){
+      :root{ --stream-h: 70vh; }   /* verticale: stream alto */
+    }
+
+    /* La griglia principale: 1) KPI auto  2) STREAM fisso  3) GRID riempie */
     #main{
       height: calc(100vh - var(--topbar-h));
       display: grid;
-      grid-template-rows: auto auto 1fr;
+      grid-template-rows: auto var(--stream-h) 1fr;
     }
 
     /* va bene anche static; l’importante è misurarla e sottrarla */
     .topbar { position: static; }
     .kpis   { margin-top: -4px; }   /* fine tuning */
-
-    /* stream: altezza fissa per non spingere giù la griglia */
-    .stream-box { height: 44vh; }          /* default landscape */
-    @media (orientation: portrait){
-      .stream-box { height: 70vh; }        /* verticale: stream più alto */
-    }
 
     /* area griglia che NON scorre: occupa lo spazio rimanente */
     #gridWrap { min-height: 0; overflow: hidden; }

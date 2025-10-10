@@ -17,7 +17,7 @@ import argparse
 import threading
 import time
 import sys
-
+import platform
 import cv2
 import numpy as np
 import uvicorn
@@ -29,18 +29,15 @@ from src.runtime import run_pipeline
 
 
 def _print_versions():
-    import platform
-    print(f"Python: {platform.python_version()} ({platform.architecture()[0]})")
+    py = platform.python_version()
+    arch = platform.architecture()[0]
     try:
-        import onnxruntime as ort  # noqa
-        try:
-            dev = ort.get_device()
-        except Exception:
-            dev = "unknown"
-        print(f"OpenCV: {cv2.__version__} | NumPy: {np.__version__} | ONNXRuntime: {ort.__version__} ({dev})")
+        import onnxruntime as ort
+        ort_s = f"{ort.__version__} ({ort.get_device()})"
     except Exception as e:
-        print(f"OpenCV: {cv2.__version__} | NumPy: {np.__version__} | ONNXRuntime: n/a ({e})")
-
+        ort_s = f"n/a ({e})"
+    print(f"Python: {py} ({arch})")
+    print(f"OpenCV: {cv2.__version__} | NumPy: {np.__version__} | ONNXRuntime: {ort_s}")
 
 def main():
     ap = argparse.ArgumentParser(description="MyDisplay Vision — service (API + pipeline)")

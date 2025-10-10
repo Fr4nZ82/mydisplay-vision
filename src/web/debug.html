@@ -2,50 +2,73 @@
 <html lang="it">
 <head>
   <meta charset="utf-8" />
-  <title>MyDisplay Vision - Debug (Compact)</title>
+  <title>MyDisplay Vision - Debug</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root { color-scheme: dark; --bg:#0f1115; --card:#131722; --border:#1f2330; --muted:#94a3b8; --ok:#22c55e; }
     * { box-sizing: border-box; }
     html, body { height: 100%; }
-    body { margin:0; background:var(--bg); color:#e5e7eb; font:13px/1.35 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; overflow:hidden; }
-    h1 { margin:10px 14px; font-size:18px; font-weight:700; }
+    body { margin:0; background:var(--bg); color:#e5e7eb; font:13px/1.35 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
 
-    .layout {
-      height: calc(100% - 40px);
-      padding: 6px 14px 14px;
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
-      grid-auto-rows: minmax(280px, auto);
-      gap: 10px;
-      overflow: auto;
+    /* HEADER */
+    .topbar{
+      position: sticky; top:0; z-index:10;
+      display:flex; align-items:center; justify-content:space-between; gap:10px;
+      padding:10px 14px; background:linear-gradient(180deg,#0f1115,rgba(15,17,21,.85));
+      border-bottom:1px solid #131826;
+      backdrop-filter: blur(6px);
     }
-    .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:10px; display:flex; flex-direction:column; min-height:0; }
-    #cardStream { grid-column: span 2; }
-    .card h2 { margin:0 0 8px; font-size:14px; font-weight:700; display:flex; align-items:center; gap:8px; }
-    .row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-    .muted { color: var(--muted); }
-    .kpis { display:flex; gap:10px; flex-wrap:wrap; padding: 0 14px 8px; }
+    .title{ font-size:18px; font-weight:700; margin:0; }
+    .actions{ display:flex; gap:8px; align-items:center; }
+    button{ background:#0d1320; color:#e5e7eb; border:1px solid #2a3142; border-radius:8px; padding:6px 10px; cursor:pointer; }
+    button:hover{ background:#0f1728; }
+
+    /* KPI */
+    .kpis { display:flex; gap:10px; flex-wrap:wrap; padding: 0 14px 10px; }
     .kpi { background:#0d1320; border:1px solid #202637; border-radius:8px; padding:6px 10px; display:flex; gap:8px; align-items:center; }
     .dot { width:8px; height:8px; border-radius:999px; display:inline-block; }
+    .on{ background:var(--ok); box-shadow:0 0 0 2px rgba(34,197,94,.25); } .off{ background:#334155; }
+    .muted{ color:var(--muted); }
+    .small{ font-size:12px; }
+
+    /* LAYOUT */
+    .layout{
+      padding: 0 14px 14px;
+      display:grid;
+      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+      gap:12px;
+      min-height: 0;
+    }
+    .card{ background:var(--card); border:1px solid var(--border); border-radius:10px; padding:10px; display:flex; flex-direction:column; min-height:0; }
+    .card h2{ margin:0 0 8px; font-size:14px; font-weight:700; display:flex; align-items:center; gap:8px; }
+
+    /* STREAM A TUTTA LARGHEZZA SOPRA */
+    #cardStream{ grid-column: 1 / -1; }
+    .stream-wrap{ display:flex; flex-direction:column; gap:6px; min-height:0; }
+    .stream-controls{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .stream-box{ flex:1; min-height:0; display:flex; align-items:center; justify-content:center; overflow:auto; background:#0b0e14; position:relative; border-radius:8px; border:1px solid #2a3142; }
+    #stream{ width:100%; height:100%; object-fit:contain; border-radius:8px; image-rendering:-webkit-optimize-contrast; }
+    .chips{ display:flex; gap:6px; flex-wrap:nowrap; overflow:auto; }
+    .chip{ display:inline-flex; gap:6px; align-items:center; padding:2px 8px; border:1px solid #2a3142; border-radius:999px; background:#0d1320; }
+
+    /* Tabelle */
+    table { width:100%; border-collapse:collapse; border:1px solid #202637; border-radius:8px; overflow:hidden; table-layout:fixed; }
+    th, td { padding:6px 8px; border-bottom:1px solid #202637; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    th { background:#111520; text-align:left; position:sticky; top:0; z-index:1; }
+    tbody tr:hover { background:#0e1320; }
+    .num{ text-align:right; }
+    .idrow.active{ background: rgba(34,197,94,.08); }
+    .scroll{ overflow:auto; }
+
+    /* ICONCINE */
     .ico { display:inline-block; width:16px; height:16px; border-radius:4px; border:1px solid #2a3142; background:#0d1320; text-align:center; line-height:16px; font-size:11px; }
     .ico.on  { background:#0f2a17; border-color:#1e3a2f; }
     .ico.off { opacity:.45; }
     .badge { display:inline-block; padding:1px 6px; border:1px solid #2a3142; border-radius:999px; background:#0d1320; }
-    .on{ background:var(--ok); box-shadow:0 0 0 2px rgba(34,197,94,.25); } .off{ background:#334155; }
 
-    /* Stream */
-    .stream-wrap { display:flex; flex-direction:column; gap:6px; min-height:0; }
-    .stream-controls { display:flex; align-items:center; gap:8px; }
-    .stream-box { flex:1; min-height:0; display:flex; align-items:center; justify-content:center; overflow:auto; background:#0b0e14; position:relative; }
-    #stream { max-width:100%; max-height:100%; height:auto; border-radius:8px; border:1px solid #2a3142; image-rendering:-webkit-optimize-contrast; object-fit: contain; }
-    .chips { display:flex; gap:6px; flex-wrap:nowrap; overflow:auto; }
-    .chip { display:inline-flex; gap:6px; align-items:center; padding:2px 8px; border:1px solid #2a3142; border-radius:999px; background:#0d1320; }
-
-    /* Fullscreen styles */
-    .fs-on body { overflow:hidden; }
-    .fs-host { position:relative; width:100%; height:100%; background:#000; }
-    .fs-img  { position:absolute; inset:0; margin:auto; width:94%; height:auto; border-radius:0; border:none; }
+    /* FULLSCREEN */
+    .fs-host { position:fixed; inset:0; background:#000; z-index:9998; }
+    .fs-img  { position:absolute; inset:0; margin:auto; width:96%; height:96%; object-fit:contain; border:none; }
     .fs-overlay {
       position:absolute; left:0; right:0; bottom:0;
       padding:10px 12px; background:linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,.35) 40%, rgba(0,0,0,.55) 100%);
@@ -53,17 +76,7 @@
     }
     .fs-chips { pointer-events:auto; display:flex; gap:8px; flex-wrap:nowrap; overflow:auto; width:100%; }
 
-    /* Tabelle */
-    table { width:100%; border-collapse:collapse; border:1px solid #202637; border-radius:8px; overflow:hidden; table-layout:fixed; }
-    th, td { padding:6px 8px; border-bottom:1px solid #202637; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    th { background:#111520; text-align:left; position:sticky; top:0; z-index:1; }
-    tbody tr:hover { background:#0e1320; }
-    .num { text-align:right; }
-    .idrow.active { background: rgba(34,197,94,.08); }
-    .scroll { overflow:auto; }
-    .small { font-size:12px; }
-
-    /* Tooltip overlay (global, no clipping) */
+    /* TOOLTIP */
     #_tip {
       position: fixed; z-index: 9999; display:none;
       max-width: 260px; padding:6px 8px; font-size:12px; line-height:1.2;
@@ -72,20 +85,39 @@
       pointer-events: none;
     }
 
-        @media (orientation: portrait){
-      body { overflow:auto; }
-      .layout { grid-template-columns: 1fr; grid-auto-rows: auto; height:auto; }
-      #cardStream { grid-column: auto; }
-      .stream-box { height: 50vh; }
+    /* MODAL CONFIG */
+    .modal{ position:fixed; inset:0; display:none; place-items:center; z-index:9999; }
+    .modal.show{ display:grid; }
+    .backdrop{ position:absolute; inset:0; background:rgba(0,0,0,.55); backdrop-filter: blur(2px); }
+    .dialog{
+      position:relative; width:min(960px, 96vw); height:min(70vh, 90vh);
+      background:var(--card); border:1px solid var(--border); border-radius:14px; padding:12px;
+      display:flex; flex-direction:column; gap:8px;
+      box-shadow: 0 20px 60px rgba(0,0,0,.6);
     }
-    @media (max-width: 1100px){
-      body { overflow:auto; }
-      .layout { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+    .dialog .head{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
+    .dialog .body{ flex:1; min-height:0; }
+    .dialog .foot{ display:flex; justify-content:flex-end; gap:8px; }
+
+    /* RESPONSIVE DIMENSIONI STREAM */
+    /* Verticale: stream alto (70vh) */
+    @media (orientation: portrait){
+      .stream-box{ height: 70vh; }
+    }
+    /* Orizzontale: stream medio (52vh) per lasciare spazio alle card */
+    @media (orientation: landscape){
+      .stream-box{ height: 52vh; }
     }
   </style>
 </head>
 <body>
-  <h1>MyDisplay Vision — Debug (Compact)</h1>
+  <div class="topbar">
+    <h1 class="title">MyDisplay Vision — Debug</h1>
+    <div class="actions">
+      <button id="btnFs">Schermo intero</button>
+      <button id="btnOpenCfg">Impostazioni</button>
+    </div>
+  </div>
 
   <!-- KPI -->
   <div class="kpis" id="kpiBar">
@@ -98,9 +130,9 @@
   </div>
 
   <div class="layout">
-    <!-- COL1 ROW1: STREAM -->
+    <!-- STREAM FULL-WIDTH TOP -->
     <div class="card" id="cardStream">
-      <h2>Stream</h2>
+      <h2>Stream <span id="capInfo" class="muted"></span></h2>
       <div class="stream-wrap">
         <div class="stream-controls small">
           <label class="muted">scale</label>
@@ -109,19 +141,16 @@
             <option value="0.5">50%</option><option value="0.75">75%</option>
             <option value="1" selected>100%</option>
           </select>
-          <button id="btnFs">fullscreen</button>
           <span class="muted">doppio-click o tasto <b>F</b></span>
-          <span id="capInfo" class="muted"></span>
         </div>
         <div class="stream-box" id="streamBox">
           <img id="stream" src="/debug/stream" alt="debug stream" />
-          <!-- overlay chips normale -->
         </div>
         <div class="chips small" id="activeChips"><span class="muted">active: —</span></div>
       </div>
     </div>
 
-    <!-- COL2 ROW1: ReID -->
+    <!-- ReID -->
     <div class="card">
       <h2>ReID Memory <span class="muted small" id="reidTs"></span></h2>
       <div class="scroll" style="flex:1; min-height:0;">
@@ -134,9 +163,9 @@
               <th class="th-tip" data-tip="Volto presente in memoria (embedding)">face</th>
               <th class="th-tip" data-tip="Genere prevalente visto su questo ID">gender</th>
               <th class="th-tip" data-tip="Età prevalente vista su questo ID">age</th>
-              <th class="th-tip" data-tip="Numero aggiornamenti in memoria" style="text-align: right;">hits</th>
-              <th class="th-tip" data-tip="Secondi dalla creazione" style="text-align: right;">age (s)</th>
-              <th class="th-tip" data-tip="Secondi dall’ultimo avvistamento" style="text-align: right;">last (s)</th>
+              <th class="th-tip" data-tip="Numero aggiornamenti" style="text-align:right;">hits</th>
+              <th class="th-tip" data-tip="Secondi dalla creazione" style="text-align:right;">age (s)</th>
+              <th class="th-tip" data-tip="Secondi dall’ultimo avvistamento" style="text-align:right;">last (s)</th>
             </tr>
           </thead>
           <tbody id="reidBody">
@@ -146,10 +175,10 @@
       </div>
     </div>
 
-    <!-- COL3 ROW1: METRICS -->
+    <!-- METRICS -->
     <div class="card">
       <h2>Aggregati al minuto <span class="muted small" id="mTs"></span></h2>
-      <div class="row small" style="margin-bottom:6px;">
+      <div class="small" style="display:flex; gap:10px; align-items:center; margin-bottom:6px;">
         <label class="muted">last</label>
         <select id="mLast"><option>5</option><option selected>10</option><option>20</option><option>50</option></select>
         <span class="muted">include current</span><input type="checkbox" id="mCur" checked />
@@ -159,10 +188,10 @@
           <thead>
             <tr>
               <th class="th-tip" data-tip="Timestamp finestra (UTC)">ts</th>
-              <th class="th-tip" data-tip="Totale persone conteggiate nella finestra"  style="text-align: right;">tot</th>
-              <th class="th-tip" data-tip="Maschi"  style="text-align: right;">Male</th>
-              <th class="th-tip" data-tip="Femmine"  style="text-align: right;">Female</th>
-              <th class="th-tip" data-tip="Sesso non classificato"  style="text-align: right;">Unknown</th>
+              <th class="th-tip" data-tip="Totale persone nella finestra"  style="text-align:right;">tot</th>
+              <th class="th-tip" data-tip="Maschi"  style="text-align:right;">Male</th>
+              <th class="th-tip" data-tip="Femmine"  style="text-align:right;">Female</th>
+              <th class="th-tip" data-tip="Sesso non classificato"  style="text-align:right;">Unknown</th>
               <th class="th-tip" data-tip="Bucket età (0-13,14-24,...,65+)">ageBuckets</th>
             </tr>
           </thead>
@@ -173,11 +202,13 @@
       </div>
     </div>
 
-    <!-- COL1 ROW2: HEALTH/STATS -->
+    <!-- HEALTH/STATS -->
     <div class="card">
       <h2>Health & Stats</h2>
-      <div class="row small muted" style="margin-bottom:6px;"><button id="btnHs">refresh</button><span id="hsTs"></span></div>
-      <div class="row" style="gap:10px; min-height:0; flex:1;">
+      <div class="small muted" style="margin-bottom:6px; display:flex; gap:8px; align-items:center;">
+        <button id="btnHs">refresh</button><span id="hsTs"></span>
+      </div>
+      <div style="display:flex; gap:10px; min-height:0; flex:1;">
         <div class="scroll" style="flex:1; min-height:0;">
           <table><thead><tr><th colspan="2">/health</th></tr></thead><tbody id="tbHealth"></tbody></table>
         </div>
@@ -186,21 +217,35 @@
         </div>
       </div>
     </div>
+  </div>
 
-    <!-- COL2–3 ROW2: CONFIG -->
-    <div class="card" style="grid-column: span 2;">
-      <h2>Config (rilevante)</h2>
-      <div class="row small muted" style="margin-bottom:6px;"><button id="btnCfg">reload</button><span id="cfgTs"></span></div>
-      <div class="scroll" style="flex:1; min-height:0;">
-        <table><thead><tr><th>chiave</th><th>valore</th></tr></thead><tbody id="tbCfg"></tbody></table>
+  <!-- MODAL CONFIG -->
+  <div class="modal" id="cfgModal" aria-hidden="true">
+    <div class="backdrop" id="cfgBackdrop"></div>
+    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="cfgTitle">
+      <div class="head">
+        <h2 id="cfgTitle" style="margin:0;">Impostazioni (config rilevante)</h2>
+        <div class="actions">
+          <button id="btnCfgReload">Ricarica</button>
+          <button id="btnCloseCfg">Chiudi</button>
+        </div>
+      </div>
+      <div class="body scroll">
+        <table>
+          <thead><tr><th>chiave</th><th>valore</th></tr></thead>
+          <tbody id="tbCfg"></tbody>
+        </table>
+      </div>
+      <div class="foot muted small">
+        Valori in sola lettura qui. La modifica a runtime arriverà in una finestra dedicata.
       </div>
     </div>
   </div>
 
-  <!-- Tooltip overlay -->
+  <!-- Tooltip -->
   <div id="_tip"></div>
 
-  <!-- Fullscreen host (iniettato dinamicamente) -->
+  <!-- Fullscreen host (iniettato) -->
   <template id="fsTpl">
     <div class="fs-host" id="fsHost">
       <img id="fsImg" class="fs-img" alt="stream" />
@@ -227,45 +272,32 @@
     const btnFs = $('btnFs');
     const fsTpl = $('fsTpl');
     let fsHost, fsImg;
-
     function enterFs(){
       if (fsOn) return;
       prevScale = scaleSel.value;
-      // crea host
       const node = fsTpl.content.cloneNode(true);
       document.body.appendChild(node);
       fsHost = $('fsHost'); fsImg = $('fsImg');
-      // punta allo stesso stream
       fsImg.src = stream.src;
-      // richieste fullscreen
       if (fsHost.requestFullscreen) fsHost.requestFullscreen();
-      // segna stato
       fsOn = true;
-      // nascondi scaling (mostriamo l'immagine al naturale nel FS)
       stream.style.transform = '';
-      // aggiorna chips overlay FS subito
       renderActiveChips(lastActive, 'activeChipsFs');
-      // shortcut ESC handled by browser; ascolta per uscita
       document.addEventListener('fullscreenchange', onFsChange);
     }
     function exitFs(){
       if (!fsOn) return;
       if (document.fullscreenElement) document.exitFullscreen();
-      // ripristina scala
       scaleSel.value = prevScale; scaleSel.onchange();
-      // rimuovi host
       if (fsHost && fsHost.parentNode) fsHost.parentNode.removeChild(fsHost);
       fsHost = null; fsImg = null; fsOn = false;
     }
-    function onFsChange(){
-      if (!document.fullscreenElement) exitFs();
-    }
+    function onFsChange(){ if (!document.fullscreenElement) exitFs(); }
     btnFs.onclick = () => fsOn ? exitFs() : enterFs();
-    // doppio click sulla box, tasto 'f'
     streamBox.ondblclick = enterFs;
     document.addEventListener('keydown', (e)=>{ if (e.key.toLowerCase()==='f') enterFs(); });
 
-    // ---------- Tooltip manager ----------
+    // ---------- Tooltip ----------
     (function tooltips(){
       const tip = $('_tip');
       function show(text, x, y){
@@ -296,7 +328,7 @@
         $('kpiFps').textContent = (h.fps ?? '—');
         $('kpiSize').textContent = Array.isArray(h.size) ? `${h.size[0]}×${h.size[1]}` : '—';
         $('kpiUptime').textContent = fmtUptime(s.uptimeSec);
-        if (Array.isArray(h.size)) capInfo.textContent = `capture ${h.size[0]}×${h.size[1]} · fps≈${h.fps ?? '—'}`;
+        if (Array.isArray(h.size)) capInfo.textContent = `· ${h.size[0]}×${h.size[1]} @≈${h.fps ?? '—'}fps`;
         $('tbHealth').innerHTML = kvRows({ ok:h.ok, camera:h.camera, fps:h.fps, size:h.size?.join('×'), since:h.since, version:h.version });
         $('tbStats').innerHTML  = kvRows({ framesTotal:s.framesTotal, lastUpdate:s.lastUpdate, lastFps:s.lastFps, cameraOk:s.cameraOk });
         $('hsTs').textContent = 'aggiornato: ' + ts();
@@ -313,7 +345,6 @@
       const ids = Object.keys(active).map(k=>parseInt(k,10)).sort((a,b)=>a-b);
       const html = ids.length ? ids.map(id => `<span class="chip"><span class="dot on"></span>#${id}</span>`).join('') : '<span class="muted">active: —</span>';
       $(targetId).innerHTML = html;
-      // replica sulle due barre (normale + FS se presente)
       if (targetId==='activeChips' && $('activeChipsFs')) $('activeChipsFs').innerHTML = html;
     }
     async function refreshReID() {
@@ -327,7 +358,7 @@
         renderActiveChips(active, 'activeChips');
 
         const tb = $('reidBody');
-        if (!mem.length) { tb.innerHTML = '<tr><td colspan="5" class="muted">—</td></tr>'; }
+        if (!mem.length) { tb.innerHTML = '<tr><td colspan="9" class="muted">—</td></tr>'; }
         else {
           tb.innerHTML = mem.map(row => {
             const id = row.id ?? row.rawId ?? row.gid ?? row.pid;
@@ -344,11 +375,8 @@
             const gender = (row.genderMajor || 'unknown');
             const ageBucket = (row.ageMajor || 'unknown');
 
-            // iconcine: 🧍 per sagoma, 🙂 per volto
             const silHTML  = `<span class="ico ${hasSil?'on':'off'}" title="silhouette/app count: ${silCount}">🧍</span>`;
             const faceHTML = `<span class="ico ${hasFace?'on':'off'}" title="face/emb count: ${faceCount}">🙂</span>`;
-
-            // badge genere/età (clic per dettaglio istogrammi, se vuoi)
             const gBadge = `<span class="badge" title="gender hist: ${JSON.stringify(row.genderHist||{})}">${gender}</span>`;
             const aBadge = `<span class="badge" title="age hist: ${JSON.stringify(row.ageHist||{})}">${ageBucket}</span>`;
 
@@ -394,36 +422,53 @@
       catch { $('mBody').innerHTML = '<tr><td colspan="6" class="muted">errore /metrics/minute</td></tr>'; }
     }
 
-    // ---------- Config ----------
-        const CFG_KEYS = [
-      'tracker_max_age',        'tracker_min_hits',     'tracker_iou_th',
-      'reid_enabled',           'reid_model_path',      'reid_similarity_th',
-      'reid_bank_size',         'reid_require_face_if_available',
-      'body_reid_model_path',   'body_reid_input_w',    'body_reid_input_h',
-      'body_reid_backend',      'body_reid_target',     'body_only_th',
-      'reid_allow_body_seed',   'count_mode',           'presence_ttl_sec',
-      'reid_memory_ttl_sec',    'count_dedup_ttl_sec',  'detector_resize_width',
-      'person_model_path',      'person_img_size',      'person_score_th',
-      'person_iou_th',          'person_max_det',       'metrics_window_sec',
-      'cls_min_conf',           'cls_interval_ms',      'rtsp_transport',
-      'rtsp_max_failures',      'debug_reid_verbose'
+    // ---------- Config (modal) ----------
+    const CFG_KEYS = [
+      'tracker_max_age','tracker_min_hits','tracker_iou_th',
+      'reid_enabled','reid_model_path','reid_similarity_th',
+      'reid_bank_size','reid_require_face_if_available',
+      'body_reid_model_path','body_reid_input_w','body_reid_input_h',
+      'body_reid_backend','body_reid_target','body_only_th',
+      'reid_allow_body_seed','count_mode','presence_ttl_sec',
+      'reid_memory_ttl_sec','count_dedup_ttl_sec','detector_resize_width',
+      'person_model_path','person_img_size','person_score_th',
+      'person_iou_th','person_max_det','metrics_window_sec',
+      'cls_min_conf','cls_interval_ms','rtsp_transport',
+      'rtsp_max_failures','debug_reid_verbose'
     ];
-    async function refreshConfig() {
-      try {
+    async function loadConfigIntoModal(){
+      try{
         const cfg = await fetch('/config').then(r=>r.json());
         $('tbCfg').innerHTML = CFG_KEYS.map(k => `<tr><td class="muted">${k}</td><td>${cfg[k] ?? ''}</td></tr>`).join('') || '<tr><td colspan="2" class="muted">—</td></tr>';
-        $('cfgTs').textContent = 'aggiornato: ' + ts();
-      } catch { $('tbCfg').innerHTML = '<tr><td colspan="2" class="muted">errore /config</td></tr>'; }
+      }catch{
+        $('tbCfg').innerHTML = '<tr><td colspan="2" class="muted">errore /config</td></tr>';
+      }
     }
+    const cfgModal = $('cfgModal'), btnOpenCfg = $('btnOpenCfg'), btnCloseCfg = $('btnCloseCfg'), cfgBackdrop = $('cfgBackdrop');
+    function openCfg(){ cfgModal.classList.add('show'); cfgModal.setAttribute('aria-hidden','false'); loadConfigIntoModal(); }
+    function closeCfg(){ cfgModal.classList.remove('show'); cfgModal.setAttribute('aria-hidden','true'); }
+    btnOpenCfg.onclick = openCfg;
+    btnCloseCfg.onclick = closeCfg;
+    cfgBackdrop.onclick = closeCfg;
+    $('btnCfgReload').onclick = loadConfigIntoModal;
+    document.addEventListener('keydown', (e)=>{ if(e.key==='Escape' && cfgModal.classList.contains('show')) closeCfg(); });
+
+    // ---------- Health tables placeholders (moved but still needed) ----------
+    // Create the tbody containers expected by refreshHealthStats
+    const hTbody = document.createElement('tbody'); hTbody.id = 'tbHealth';
+    const sTbody = document.createElement('tbody'); sTbody.id = 'tbStats';
+    // Inject into existing tables in Health & Stats
+    (() => {
+      const healthTable = document.querySelector('table thead tr th[colspan="2"]:contains("/health")');
+    })(); // noop, i tbody sono già in DOM in questa versione
 
     // Wiring
     $('mLast').onchange = refreshMetrics;
     $('mCur').onchange = refreshMetrics;
     $('btnHs').onclick = refreshHealthStats;
-    $('btnCfg').onclick = refreshConfig;
 
     // Init + polling
-    refreshHealthStats(); refreshReID(); refreshMetrics(); refreshConfig();
+    refreshHealthStats(); refreshReID(); refreshMetrics();
     setInterval(refreshHealthStats, 2000);
     setInterval(refreshReID, 2000);
     setInterval(refreshMetrics, 5000);

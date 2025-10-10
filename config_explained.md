@@ -20,7 +20,6 @@ Questo documento elenca e spiega tutte le proprietà utilizzabili in config.json
     - [Obiettivi e panoramica](#obiettivi-e-panoramica)
     - [Face ReID (SFace/ArcFace)](#face-reid-sfacearcface)
     - [Body ReID (OSNet / Intel OMZ)](#body-reid-osnet--intel-omz)
-    - [Firma di aspetto legacy (colore vestiti)](#firma-di-aspetto-legacy-colore-vestiti)
     - [Politiche di fusione e soglie](#politiche-di-fusione-e-soglie)
     - [Memoria, TTL e banca di feature](#memoria-ttl-e-banca-di-feature)
     - [Diagnostica ReID](#diagnostica-reid)
@@ -203,21 +202,17 @@ Funzionamento: registra un evento quando il centro del box attraversa la tripwir
 
 Ambito: riassociare la stessa persona su uscite/rientri entro TTL; ridurre duplicati e conteggi spuri.
 
-La pipeline usa embedding di volto e corpo; la firma di aspetto (colore) è legacy/opzionale e, in presenza di Body ReID, si consiglia di disattivarla (appearance_weight=0). Una policy di soglie/fusione assegna l’ID più plausibile con priorità volto > corpo > (eventuale) aspetto.
+La pipeline usa embedding di volto e corpo. La policy assegna l’ID più plausibile con priorità volto > corpo.
 
 ### Face ReID (SFace/ArcFace)
 
 - reid_enabled (default: true): abilita ReID volto.
 - reid_model_path (default: "").
 - reid_similarity_th (default: 0.365): soglia match volto.
-- reid_face_gate (default: 0.42): gate minimo per considerare affidabile il volto.
 - reid_require_face_if_available (default: true): preferisci ID già ancorati da volto.
 - reid_cache_size (default: 1000): dimensione cache ID.
 - reid_memory_ttl_sec (default: 600): TTL memoria (eviction/presence).
 - reid_bank_size (default: 10): max feature per banca/ID.
-- reid_merge_sim (default: 0.55): soglia merge alias simili.
-- reid_prefer_oldest (default: true): tie‑break verso ID più vecchio.
-- reid_app_only_th (default: 0.65): soglia severa per match “solo aspetto”.
 
 ### Body ReID (OSNet / Intel OMZ)
 
@@ -227,18 +222,11 @@ La pipeline usa embedding di volto e corpo; la firma di aspetto (colore) è lega
 - body_only_th (default: 0.80): soglia match solo-corpo.
 - reid_allow_body_seed (default: true): consenti creare ID con sola feature corpo quando nessun match è affidabile.
 
-### Firma di aspetto legacy (colore vestiti)
-
-- appearance_hist_bins (default: 24): bins istogramma HSV.
-- appearance_min_area_px (default: 900): area minima del crop per calcolo firma.
-- appearance_weight (default: 0.35): peso nella fusione (prior debole).
-
 ### Politiche di fusione e soglie
 
-Priorità: volto > corpo > aspetto.  
+Priorità: volto > corpo.  
 - Se face_sim ≥ reid_similarity_th → match per volto.
 - Altrimenti se body_sim ≥ body_only_th → match per corpo (con gate verso ID con volto se reid_require_face_if_available = true).
-- In alternativa, aspetto se ≥ reid_app_only_th (prudenza).
 - Nessun match → nuovo ID; se reid_allow_body_seed = true, semina banca corpo.
 
 ### Memoria, TTL e banca di feature
@@ -247,7 +235,7 @@ Priorità: volto > corpo > aspetto.
 
 ### Diagnostica ReID
 
-- debug_reid_verbose (default: false): stampa decisioni (ID scelto, face/body/app, top‑3).
+- debug_reid_verbose (default: false): stampa decisioni (ID scelto, face/body, top‑3).
 
 
 ## 🧮 Modalità di conteggio e deduplica

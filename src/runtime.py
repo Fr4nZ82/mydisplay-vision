@@ -135,9 +135,8 @@ def run_pipeline(state: HealthState, cfg) -> None:
                 similarity_th=float(getattr(cfg, "reid_similarity_th", 0.365)),
                 cache_size=int(getattr(cfg, "reid_cache_size", 1000)),
                 memory_ttl_sec=int(getattr(cfg, "reid_memory_ttl_sec", 600)),
-                bank_size=int(getattr(cfg, "reid_bank_size", 10)),
-                merge_sim=float(getattr(cfg, "reid_merge_sim", 0.55)),
-                prefer_oldest=bool(getattr(cfg, "reid_prefer_oldest", True)),
+                                bank_size=int(getattr(cfg, "reid_bank_size", 10)),
+
             )
         else:
             reid = FaceReID("", 1.0, 1, 1)  # istanza "spenta" safe
@@ -146,37 +145,18 @@ def run_pipeline(state: HealthState, cfg) -> None:
         print(f"[WARN] ReID init failed: {e}")
         reid = FaceReID("", 1.0, 1, 1)
 
-    # Parametri appearance (se il metodo non esiste ancora, salta)
-    if hasattr(reid, "set_appearance_params"):
-        try:
-            reid.set_appearance_params(
-                bins=int(getattr(cfg, "appearance_hist_bins", 24)),
-                min_area_px=int(getattr(cfg, "appearance_min_area_px", 900)),
-                weight=float(getattr(cfg, "appearance_weight", 0.35)),
-                app_th=float(getattr(cfg, "reid_app_similarity_th", 0.82)),
-            )
-            # NEW: estendi policy con body_only_th / allow_body_seed in modo retro-compatibile
-            try:
-                reid.set_id_policy(
-                    appearance_weight=float(getattr(cfg, "appearance_weight", 0.35)),
-                    app_only_min_th=float(getattr(cfg, "reid_app_only_th", 0.65)),
-                    require_face_if_available=bool(getattr(cfg, "reid_require_face_if_available", True)),
-                    face_gate=float(getattr(cfg, "reid_face_gate", max(getattr(cfg, "reid_similarity_th", 0.35), 0.42))),
-                    body_only_th=float(getattr(cfg, "body_only_th", 0.80)),
-                    allow_body_seed=bool(getattr(cfg, "reid_allow_body_seed", True)),
-                )
-            except TypeError:
-                reid.set_id_policy(
-                    appearance_weight=float(getattr(cfg, "appearance_weight", 0.35)),
-                    app_only_min_th=float(getattr(cfg, "reid_app_only_th", 0.65)),
-                    require_face_if_available=bool(getattr(cfg, "reid_require_face_if_available", True)),
-                    face_gate=float(getattr(cfg, "reid_face_gate", max(getattr(cfg, "reid_similarity_th", 0.35), 0.42))),
-                )
-            # NEW: verbose debug decisioni ReID (se supportato)
-            if hasattr(reid, "set_debug"):
-                reid.set_debug(bool(getattr(cfg, "debug_reid_verbose", False)))
-        except Exception:
-            pass
+    # Policy ReID: volto/corpo (niente appearance)
+    try:
+        reid.set_id_policy(
+            require_face_if_available=bool(getattr(cfg, "reid_require_face_if_available", True)),
+            body_only_th=float(getattr(cfg, "body_only_th", 0.80)),
+            allow_body_seed=bool(getattr(cfg, "reid_allow_body_seed", True)),
+        )
+        if hasattr(reid, "set_debug"):
+            reid.set_debug(bool(getattr(cfg, "debug_reid_verbose", False)))
+    except Exception:
+        pass
+
     
     # NEW: Backend Body ReID opzionale (OSNet/Intel OMZ) – safe se non configurato o non disponibile
     try:
@@ -459,22 +439,20 @@ def run_pipeline(state: HealthState, cfg) -> None:
                             face_crop = vis[max(0, fy): fy + fh, max(0, fx): fx + fw]
                         else:
                             face_crop = None
-                        # Usa persona come 'appearance', volto (se c'è) come face
+                        # Usa corpo per Person ReID (se backend presente) e volto (se c'è) per Face ReID
                         try:
                             gid = reid.assign_global_id(
                                 face_bgr_crop=face_crop,
                                 kps5=None,
-                                appearance_bgr_crop=person_crop
+                                body_bgr_crop=person_crop
                             )
                         except TypeError:
+                            # fallback: chiamate legacy senza body
                             try:
-                                gid = reid.assign_global_id(
-                                    face_bgr_crop=face_crop,
-                                    kps5=None,
-                                    appearance_bgr_crop=person_crop,
-                                )
+                                gid = reid.assign_global_id(face_bgr_crop=face_crop, kps5=None)
                             except TypeError:
                                 gid = reid.assign_global_id(face_crop, None)
+
                         gid = reid.canon(gid)
                         tstate["global_id"] = gid
                         tstate["assigned_with_face"] = (matched_face is not None)
@@ -503,7 +481,7 @@ def run_pipeline(state: HealthState, cfg) -> None:
                         last    = float(info.get('last', 0.0))
                         created = float(info.get('created', last))
                         feats   = list(info.get('feats', []) or [])
-                        apps    = list(info.get('app', []) or [])
+                        body    = list(info.get('body', []) or [])
                         meta    = info.get('meta', {}) or {}
                         gh      = meta.get('gender_hist', {}) or {}
                         ah      = meta.get('age_hist', {}) or {}
@@ -520,15 +498,16 @@ def run_pipeline(state: HealthState, cfg) -> None:
                             'created': created,
                             'ageSec': max(0, now_s - created),
                             'hasFace': len(feats) > 0,
-                            'hasSilhouette': len(apps) > 0,
+                            'hasSilhouette': len(body) > 0,
                             'faceCount': len(feats),
-                            'silCount': len(apps),
+                            'silCount': len(body),
                             'genderMajor': genderMajor,
                             'ageMajor': ageMajor,
                             'genderHist': gh,
                             'ageHist': ah,
                             'ttlRemSec': ttlRem,
                         })
+
                     mem_items.sort(key=lambda r: r['id'])
                     state.set_reid_debug(mem_items)
                 except Exception:
@@ -566,9 +545,8 @@ def run_pipeline(state: HealthState, cfg) -> None:
                                         new_gid = reid.assign_global_id(
                                             face_bgr_crop=face_roi,
                                             kps5=None,
-                                            appearance_bgr_crop=vis[max(0, t["bbox"][1]): t["bbox"][1] + t["bbox"][3],
-                                                                    max(0, t["bbox"][0]): t["bbox"][0] + t["bbox"][2]],
                                         )
+
                                     new_gid = reid.canon(new_gid)
                                     if new_gid != tstate.get("global_id", tid):
                                         tstate["global_id"] = new_gid

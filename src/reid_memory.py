@@ -63,18 +63,7 @@ def _warp_face_bgr(img: np.ndarray, kps: np.ndarray, out_size=(112, 112)) -> Opt
         return None
     return cv2.warpAffine(img, M, out_size, flags=cv2.INTER_LINEAR, borderValue=0)
 
-def _appearance_signature(bgr: np.ndarray, bins: int = 24, min_area_px: int = 900) -> Optional[np.ndarray]:
-    if bgr is None or bgr.size == 0:
-        return None
-    h, w = bgr.shape[:2]
-    if h * w < max(1, int(min_area_px)):
-        return None
-    hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
-    hist = cv2.calcHist([hsv], [0, 1], None, [bins, bins], [0, 180, 0, 256]).astype(np.float32)
-    hist = cv2.normalize(hist, None).reshape(-1)
-    # add simple geometric cues: aspect ratio and relative area (bounded)
-    ar = np.array([w / (h + 1e-6), (h * w) / 1e6], dtype=np.float32)  # scale area roughly
-    return _l2_normalize(np.concatenate([hist, ar], axis=0))
+
 
 class _BackendSFace:
     """
@@ -153,45 +142,28 @@ class FaceReID:
       cache_size:    max persone ricordate
       memory_ttl_sec:scadenza della memoria (secondi)
     """
-    def __init__(self,
-                 model_path: str,
-                 similarity_th: float = 0.365,
-                 cache_size: int = 1000,
-                 memory_ttl_sec: int = 600,
-                 bank_size: int = 10,
-                 merge_sim: float = 0.55,
-                 prefer_oldest: bool = True):
+    def __init__(self, model_path: str, similarity_th: float = 0.365, cache_size: int = 1000, memory_ttl_sec: int = 600, bank_size: int = 10):
         self.sim_th = float(similarity_th)
         self.cache_size = int(cache_size)
         self.ttl = int(memory_ttl_sec)
         self.bank_size = int(bank_size)
-        self.merge_sim = float(merge_sim)
-        self.prefer_oldest = bool(prefer_oldest)
-        # --- presence/appearance params (usati dal runtime e da assign_global_id) ---
+        # --- presence params ---
         self.on_evict = None                 # callable(gid:int, meta:dict, last_ts:float)
-        self.appearance_bins = 24
-        self.appearance_min_area_px = 900
-        self.appearance_weight = 0.35  # usato solo se volto + aspetto sono entrambi disponibili
         self.require_face_if_available = True   # abilita la policy di gating corpo→solo-ID-con-volto
-        self.app_only_min_th = 0.82             # soglia più severa per match solo-aspetto
-        # soglia dedicata per matching SOLO aspetto (più severa)
-        self.app_th = 0.82
-        self.face_gate = max(self.sim_th, 0.42)  # soglia minima per dire che due facce sono la stessa persona
+
 
         self.enabled = True
         self.next_global_id = 1
         # global_id -> {
         #   'feats': [face_embed,...],
-
-        #   'app': [appearance_sig,...],
         #   'body': [body_embed,...],            # NEW
         #   'last': ts, 'created': ts, 'hits': int,
-
         #   'meta': {'gender_hist': Counter, 'age_hist': Counter}
         # }
         self.mem: "OrderedDict[int, Dict[str, Any]]" = OrderedDict()
         # alias map: nuovo_id -> id_canonico (vecchio)
         self.alias: Dict[int, int] = {}
+
 
         # Scegli backend: prova SFace, altrimenti ArcFace DNN
         self.backend_name = "unknown"
@@ -251,23 +223,7 @@ class FaceReID:
 
         if not feats or feat is None:
             return -1.0
-        return max(float(np.dot(f, feat) / ((np.linalg.norm(f)+1e-9)*(np.linalg.norm(feat)+1e-9))) for f in feats)
-
-    def _best_match(self, feat: np.ndarray) -> Tuple[Optional[int], float, Optional[Tuple[int,float]]]:
-        best_id, best_sim = None, -1.0
-        second = (None, -1.0)
-        for pid in self.mem.keys():
-            sim = self._sim_to_pid(pid, feat)
-            if sim > best_sim:
-                second = (best_id, best_sim)
-                best_id, best_sim = pid, sim
-            elif sim > second[1]:
-                second = (pid, sim)
-        # tie-break: se sim ~ uguali e prefer_oldest, scegli l'id più vecchio
-        if self.prefer_oldest and second[0] is not None and best_id is not None:
-            if abs(best_sim - second[1]) <= 0.02 and second[0] < best_id:
-                best_id, best_sim, second = second[0], second[1], (best_id, best_sim)
-        return best_id, best_sim, second
+        return max(float(np.dot(f, feat) / ((np.linalg.norm(f)+1e-9)*(np.linalg.norm(feat)+1e-9))) for f in feats) 
 
     def _add_feat(self, pid: int, feat: np.ndarray, now: float):
         info = self.mem.get(pid)
@@ -287,140 +243,13 @@ class FaceReID:
             pid = self.alias[pid]
         return pid
     
-    # --- setter usato dal runtime per configurare i parametri aspetto ---
-    def set_appearance_params(
-        self,
-        bins: int = 24,
-        min_area_px: int = 900,
-        weight: float = 0.35,
-        app_th: Optional[float] = None,   # compat: alias del vecchio nome
-    ):
-        self.appearance_bins = int(bins)
-        self.appearance_min_area_px = int(min_area_px)
-        self.appearance_weight = float(weight)
-        if app_th is not None:
-            # aggiorna ENTRAMBE, così la soglia ha effetto sul matching corrente
-            self.app_only_min_th = float(app_th)
-            self.app_th = float(app_th)
-
-
-
-    def set_id_policy(self, appearance_weight=None, app_only_min_th=None, require_face_if_available=None, face_gate=None,
-                      body_only_th=None, allow_body_seed=None):
-        if appearance_weight is not None:
-            self.appearance_weight = float(appearance_weight)
-        if app_only_min_th is not None:
-            self.app_only_min_th = float(app_only_min_th)
+    def set_id_policy(self, require_face_if_available=None, body_only_th=None, allow_body_seed=None):
         if require_face_if_available is not None:
             self.require_face_if_available = bool(require_face_if_available)
-        if face_gate is not None:
-            self.face_gate = float(face_gate)
         if body_only_th is not None:
             self.body_only_th = float(body_only_th)
         if allow_body_seed is not None:
             self.allow_body_seed = bool(allow_body_seed)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     # --- NEW: setter backend/body + debug ---
     def set_body_backend(self, backend) -> None:
@@ -434,16 +263,8 @@ class FaceReID:
     def _add_body(self, pid: int, vec: np.ndarray, now: float):
         info = self.mem.get(pid)
 
-
-
-
-
-
-
         if not info:
             return
-
-
         bank = info.setdefault('body', [])
         bank.append(np.asarray(vec, dtype=np.float32))
         if len(bank) > self.bank_size:
@@ -465,41 +286,14 @@ class FaceReID:
 
         return max(_cosine_sim(b, vec) for b in bank)
 
-
-
-
-    # --- banca aspetto (già presente) ---
-    def _add_app(self, pid: int, app_sig: np.ndarray, now: float):
-        info = self.mem.get(pid)
-        if not info:
-            return
-        bank = info.setdefault('app', [])
-        bank.append(app_sig)
-        if len(bank) > self.bank_size:
-            bank.pop(0)
-        info['last'] = now
-        info['hits'] += 1
-        self.mem[pid] = info
-
-    def _sim_to_pid_app(self, pid: int, sig: np.ndarray) -> float:
-        info = self.mem.get(pid)
-        if not info:
-            return -1.0
-        bank = info.get('app', [])
-        if not bank:
-            return -1.0
-        return max(_cosine_sim(f, sig) for f in bank)
-
     # --- NEW: fusione ranking (rispetta soglie finali) ---
     @staticmethod
-    def _fuse(face_sim: float, body_sim: float, app_sim: float) -> float:
+    def _fuse(face_sim: float, body_sim: float, _unused: float = None) -> float:
         parts = []
         if face_sim is not None and face_sim >= 0.0:
             parts.append((float(face_sim), 1.0))
         if body_sim is not None and body_sim >= 0.0:
             parts.append((float(body_sim), 0.7))
-        if app_sim is not None and app_sim >= 0.0:
-            parts.append((float(app_sim), 0.3))
         if not parts:
             return -1.0
         num = sum(s * w for s, w in parts)
@@ -507,12 +301,8 @@ class FaceReID:
         return float(num / (den + 1e-9))
 
     # ----------------- API principale -----------------
-    def assign_global_id(self,
-                         face_bgr_crop: Optional[np.ndarray],
-                         kps5: Optional[np.ndarray] = None,
-                         now_ts: Optional[float] = None,
-                         appearance_bgr_crop: Optional[np.ndarray] = None,
-                         body_bgr_crop: Optional[np.ndarray] = None) -> int:
+    def assign_global_id(self, face_bgr_crop: Optional[np.ndarray], kps5: Optional[np.ndarray] = None, now_ts: Optional[float] = None, body_bgr_crop: Optional[np.ndarray] = None) -> int:
+
         now = time.time() if now_ts is None else now_ts
         self._prune(now)
 
@@ -539,20 +329,11 @@ class FaceReID:
             except Exception:
                 body_vec = None
 
-        # 3) firma aspetto legacy (colore vestiti)
-        app_sig = None
-        if appearance_bgr_crop is not None:
-            app_sig = _appearance_signature(
-                appearance_bgr_crop,
-                bins=self.appearance_bins,
-                min_area_px=self.appearance_min_area_px
-            )
-
         # Nessun segnale → nuovo ID
-        if feat is None and body_vec is None and app_sig is None:
+        if feat is None and body_vec is None:
             gid = self.next_global_id
             self.next_global_id += 1
-            self.mem[gid] = {'feats': [], 'app': [], 'body': [], 'last': now, 'created': now, 'hits': 1,
+            self.mem[gid] = {'feats': [], 'body': [], 'last': now, 'created': now, 'hits': 1,
                              'meta': {'gender_hist': {}, 'age_hist': {}}}
             if self.debug:
                 print(f"[ReID] new id(no signals) -> G{gid}")
@@ -568,10 +349,9 @@ class FaceReID:
         for pid in self.mem.keys():
             fs = self._sim_to_pid(pid, feat) if feat is not None else -1.0
             bs = self._sim_to_pid_body(pid, body_vec) if body_vec is not None else -1.0
-            asim = self._sim_to_pid_app(pid, app_sig) if app_sig is not None else -1.0
-            fused = self._fuse(fs, bs, asim)
-            cand.append((pid, fs, bs, asim, fused))
-        cand.sort(key=lambda r: r[4], reverse=True)
+            fused = self._fuse(fs, bs, None)
+            cand.append((pid, fs, bs, fused))
+        cand.sort(key=lambda r: r[3], reverse=True)
 
         # ------------- Decisioni -------------
         chosen = None
@@ -594,32 +374,20 @@ class FaceReID:
                 chosen = int(best_body[0])
                 reason = f"body>=th({best_body[2]:.3f})"
 
-        # C) In mancanza, valuta aspetto legacy (più severo)
-        if chosen is None and app_sig is not None:
-            cand_app = [(pid, fs, bs, asim, fused) for (pid, fs, bs, asim, fused) in cand
-                        if (not self.require_face_if_available) or _id_has_face(pid)]
-            best_app = max(cand_app, key=lambda r: r[3]) if cand_app else None
-            if best_app and best_app[3] >= self.app_only_min_th:
-                chosen = int(best_app[0])
-                reason = f"app>=th({best_app[3]:.3f})"
-
         # D) Se nulla supera le soglie → crea nuovo
         if chosen is None:
             new_id = self.next_global_id
             self.next_global_id += 1
-            self.mem[new_id] = {'feats': [], 'app': [], 'body': [], 'last': now, 'created': now, 'hits': 1,
+            self.mem[new_id] = {'feats': [], 'body': [], 'last': now, 'created': now, 'hits': 1,
                                 'meta': {'gender_hist': {}, 'age_hist': {}}}
             # seeding banche
             if feat is not None:
                 self._add_feat(new_id, feat, now)
             if body_vec is not None and self.allow_body_seed:
                 self._add_body(new_id, body_vec, now)
-            if app_sig is not None:
-                # non vincolante: aggiungi anche aspetto legacy (opzionale)
-                self._add_app(new_id, app_sig, now)
             if self.debug:
                 top3 = cand[:3]
-                print(f"[ReID] NEW -> G{new_id} | reason={reason} top3={[(p, round(f,3), round(b,3), round(a,3)) for (p,f,b,a,_) in top3]}")
+                print(f"[ReID] NEW -> G{new_id} | reason={reason} top3={[(p, round(f,3), round(b,3)) for (p,f,b,_) in top3]}")
             return new_id
 
         # Match su ID esistente
@@ -628,13 +396,11 @@ class FaceReID:
             self._add_feat(pid, feat, now)
         if body_vec is not None:
             self._add_body(pid, body_vec, now)
-        if app_sig is not None:
-            self._add_app(pid, app_sig, now)
-
         if self.debug:
             top3 = cand[:3]
-            print(f"[ReID] MATCH -> G{pid} | reason={reason} top3={[(p, round(f,3), round(b,3), round(a,3)) for (p,f,b,a,_) in top3]}")
+            print(f"[ReID] MATCH -> G{pid} | reason={reason} top3={[(p, round(f,3), round(b,3)) for (p,f,b,_) in top3]}")
         return pid
+
 
     def touch(self, global_id: int, now_ts: Optional[float] = None):
         now = time.time() if now_ts is None else now_ts

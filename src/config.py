@@ -41,9 +41,6 @@ _DEFAULTS: Dict[str, Any] = {
     # --- Counting mode ---
     "count_mode": "presence",       # "presence" | "tripwire"
     "presence_ttl_sec": 600,        # quanto tenere "vivo" un global id prima di contarlo (eviction)
-    "appearance_hist_bins": 24,     # dimensione istogramma HSV per firma vestiti/aspetto
-    "appearance_min_area_px": 900,  # ignora firme se il crop è troppo piccolo
-    "appearance_weight": 0.35,      # peso sim. aspetto nella fusione con sim. volto
 
     # --- Person detector (primary tracking) ---
     "person_model_path": "",       # es: "models/yolov8n.onnx"
@@ -103,10 +100,6 @@ _DEFAULTS: Dict[str, Any] = {
     "reid_cache_size": 1000,       # max persone ricordate
     "reid_memory_ttl_sec": 600,    # 10 minuti: mantieni l'associazione global_id
     "reid_bank_size": 10,          # NUM descrittori per ID (feature bank)
-    "reid_merge_sim": 0.55,        # se un nuovo embedding è così simile a un ID esistente → alias merge
-    "reid_prefer_oldest": True,    # in caso di dubbio, tieni l'ID più vecchio
-    "reid_app_only_th": 0.65,      # già usata nel runtime via set_id_policy (app_only_min_th alias)
-    "reid_face_gate": 0.42,
     "reid_require_face_if_available": True,
 
     # --- Body ReID (NUOVO) ---

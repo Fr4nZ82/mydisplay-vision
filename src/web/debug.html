@@ -15,12 +15,13 @@
       height: calc(100% - 40px);
       padding: 6px 14px 14px;
       display: grid;
-      grid-template-columns: 1.1fr 1fr 1fr;
-      grid-template-rows: 0.72fr 0.58fr;
+      grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+      grid-auto-rows: minmax(280px, auto);
       gap: 10px;
-      overflow: hidden;
+      overflow: auto;
     }
     .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:10px; display:flex; flex-direction:column; min-height:0; }
+    #cardStream { grid-column: span 2; }
     .card h2 { margin:0 0 8px; font-size:14px; font-weight:700; display:flex; align-items:center; gap:8px; }
     .row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
     .muted { color: var(--muted); }
@@ -36,8 +37,8 @@
     /* Stream */
     .stream-wrap { display:flex; flex-direction:column; gap:6px; min-height:0; }
     .stream-controls { display:flex; align-items:center; gap:8px; }
-    .stream-box { flex:1; min-height:0; display:flex; align-items:center; justify-content:flex-start; overflow:auto; background:#0b0e14; position:relative; }
-    #stream { max-width:100%; height:auto; border-radius:8px; border:1px solid #2a3142; image-rendering:-webkit-optimize-contrast; }
+    .stream-box { flex:1; min-height:0; display:flex; align-items:center; justify-content:center; overflow:auto; background:#0b0e14; position:relative; }
+    #stream { max-width:100%; max-height:100%; height:auto; border-radius:8px; border:1px solid #2a3142; image-rendering:-webkit-optimize-contrast; object-fit: contain; }
     .chips { display:flex; gap:6px; flex-wrap:nowrap; overflow:auto; }
     .chip { display:inline-flex; gap:6px; align-items:center; padding:2px 8px; border:1px solid #2a3142; border-radius:999px; background:#0d1320; }
 
@@ -71,9 +72,15 @@
       pointer-events: none;
     }
 
-    @media (max-width:1100px){
+        @media (orientation: portrait){
       body { overflow:auto; }
-      .layout { grid-template-columns: 1fr; grid-template-rows: auto auto auto auto auto auto; height:auto; }
+      .layout { grid-template-columns: 1fr; grid-auto-rows: auto; height:auto; }
+      #cardStream { grid-column: auto; }
+      .stream-box { height: 50vh; }
+    }
+    @media (max-width: 1100px){
+      body { overflow:auto; }
+      .layout { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
     }
   </style>
 </head>
@@ -123,7 +130,7 @@
             <tr>
               <th class="th-tip" data-tip="Stato attivo nel frame corrente">on</th>
               <th class="th-tip" data-tip="Identificatore globale (persistente)">#ID</th>
-              <th class="th-tip" data-tip="Sagoma/vestiti rilevati (firma aspetto)">sil</th>
+              <th class="th-tip" data-tip="Embedding corpo (Body ReID) presente">body</th>
               <th class="th-tip" data-tip="Volto presente in memoria (embedding)">face</th>
               <th class="th-tip" data-tip="Genere prevalente visto su questo ID">gender</th>
               <th class="th-tip" data-tip="Età prevalente vista su questo ID">age</th>
@@ -388,16 +395,18 @@
     }
 
     // ---------- Config ----------
-    const CFG_KEYS = [
+        const CFG_KEYS = [
       'tracker_max_age',        'tracker_min_hits',     'tracker_iou_th',
-      'reid_enabled',           'reid_similarity_th',   'reid_bank_size',
-      'reid_merge_sim',         'reid_prefer_oldest',   'count_dedup_ttl_sec',
-      'metrics_window_sec',     'cls_min_conf',         'cls_interval_ms',
-      'rtsp_transport',         'rtsp_max_failures',    'count_mode',
-      'presence_ttl_sec',       'reid_memory_ttl_sec',  'appearance_hist_bins',
-      'appearance_min_area_px', 'appearance_weight',    'detector_resize_width',
+      'reid_enabled',           'reid_model_path',      'reid_similarity_th',
+      'reid_bank_size',         'reid_require_face_if_available',
+      'body_reid_model_path',   'body_reid_input_w',    'body_reid_input_h',
+      'body_reid_backend',      'body_reid_target',     'body_only_th',
+      'reid_allow_body_seed',   'count_mode',           'presence_ttl_sec',
+      'reid_memory_ttl_sec',    'count_dedup_ttl_sec',  'detector_resize_width',
       'person_model_path',      'person_img_size',      'person_score_th',
-      'person_iou_th',          'person_max_det'
+      'person_iou_th',          'person_max_det',       'metrics_window_sec',
+      'cls_min_conf',           'cls_interval_ms',      'rtsp_transport',
+      'rtsp_max_failures',      'debug_reid_verbose'
     ];
     async function refreshConfig() {
       try {

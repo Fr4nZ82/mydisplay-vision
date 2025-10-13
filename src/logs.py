@@ -20,6 +20,7 @@ from typing import Any, Dict, Optional
 
 _SESSION_ID: Optional[str] = None
 _EVENT_LOGGER: Optional[logging.Logger] = None
+_LOG_PATH: Optional[str] = None  # aggiunto
 
 
 def _now_iso() -> str:
@@ -30,8 +31,12 @@ def get_session_id() -> Optional[str]:
     return _SESSION_ID
 
 
+def get_log_path() -> Optional[str]:
+    return _LOG_PATH
+
+
 def setup_logging(cfg) -> None:
-    global _SESSION_ID, _EVENT_LOGGER
+    global _SESSION_ID, _EVENT_LOGGER, _LOG_PATH  # aggiornato
     if _EVENT_LOGGER is not None:
         return  # già configurato
 
@@ -63,6 +68,7 @@ def setup_logging(cfg) -> None:
     fmt = logging.Formatter("%(message)s")
     fh.setFormatter(fmt)
     _EVENT_LOGGER.addHandler(fh)
+    _LOG_PATH = fname  # salva percorso
 
     # Log iniziale di sessione
     base_info = {
@@ -102,3 +108,4 @@ def log_event(ev: str, **fields: Any) -> None:
         _EVENT_LOGGER.info(json.dumps(obj, ensure_ascii=False))
     except Exception:
         pass
+

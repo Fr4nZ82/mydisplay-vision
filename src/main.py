@@ -26,7 +26,7 @@ from src.config import AppConfig
 from src.api import build_app
 from src.state import HealthState
 from src.runtime import run_pipeline
-from src.logs import setup_logging, log_event
+from src.logs import setup_logging, log_event, get_log_path
 
 
 def _print_versions():
@@ -60,6 +60,11 @@ def main():
 
     # Setup logging strutturato
     setup_logging(cfg)
+    lp = get_log_path()
+    if lp:
+        print(f"[LOG] JSONL -> {lp}")
+    else:
+        print("[LOG] logging disabilitato")
     log_event("APP_START", py=sys.version, platform=platform.platform())
 
     # Stato condiviso API <-> Pipeline
@@ -88,3 +93,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

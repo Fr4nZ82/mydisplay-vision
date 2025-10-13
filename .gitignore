@@ -32,3 +32,4 @@ Thumbs.db
 !models/**/README.md
 !models/manifest.json
 /dev_temp
+/logs

@@ -22,8 +22,8 @@
   "tracker_iou_th": 0.35,
 
   "person_img_size": 640,
-  "person_score_th": 0.26,
-  "person_iou_th": 0.45,
+  "person_score_th": 0.28,
+  "person_iou_th": 0.40,
   "person_max_det": 200,
   "person_backend": 0,
   "person_target": 0,
@@ -54,7 +54,7 @@
   "roi_band_px": 8,
 
   "reid_enabled": true,
-  "reid_similarity_th": 0.365,
+  "reid_similarity_th": 0.355,
   "reid_cache_size": 1000,
   "reid_memory_ttl_sec": 600,
   "reid_bank_size": 10,
@@ -64,7 +64,7 @@
   "body_reid_input_h": 256,
   "body_reid_backend": 0,
   "body_reid_target": 0,
-  "body_only_th": 0.80,
+  "body_only_th": 0.81,
   "reid_allow_body_seed": true,
 
   "debug_reid_verbose": false,

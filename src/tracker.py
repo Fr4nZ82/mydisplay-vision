@@ -173,7 +173,7 @@ class SortLiteTracker:
         # Return active tracks (min_hits gating)
         out = []
         for tid, tr in self.tracks.items():
-            if tr["hits"] >= self.min_hits or tr["time_since_update"] == 0:
+            if tr["hits"] >= self.min_hits:
                 out.append({
                     "track_id": tid,
                     "bbox": list(tr["bbox"]),

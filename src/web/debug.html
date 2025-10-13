@@ -37,7 +37,7 @@
       margin: 0;
       background:var(--card); border:1px solid var(--border);
       border-radius:10px; padding:10px;
-      display:flex; flex-direction:column; min-height:0;
+      display:flex; flex-direction:column; min-height:0; position:relative; z-index:2; /* sopra eventuali sticky vicini */
     }
     .grid{
       display:grid;
@@ -46,9 +46,29 @@
       grid-auto-flow: dense;           /* riempi buchi */
       align-items: stretch;
     }
-    .card{ background:var(--card); border:1px solid var(--border); border-radius:10px; padding:10px; display:flex; flex-direction:column; min-height:0; }
+    .card{
+      background:var(--card); border:1px solid var(--border); border-radius:10px;
+      padding:10px; display:flex; flex-direction:column; min-height:0; position:relative; overflow:hidden;
+    }
     .card h2{ margin:0 0 8px; font-size:14px; font-weight:700; display:flex; align-items:center; gap:8px; }
 
+    /* STATUS BAR (Health & Stats compatto) */
+    .statusbar{
+      display:flex; align-items:center; gap:10px;
+      flex-wrap:wrap;
+      background:#0d1320; border:1px solid #202637; border-radius:8px;
+      padding:8px 10px;
+    }
+    .field{
+      display:flex; align-items:center; gap:6px;
+      background:#0b0f1e; border:1px solid #1f2636; border-radius:999px;
+      padding:4px 10px; font-size:12.5px;
+    }
+    .field b{ font-weight:600; color:#cbd5e1; }
+    .field .val{ font-variant-numeric: tabular-nums; color:#e5e7eb; }
+    .field .dot{ width:8px; height:8px; border-radius:999px; display:inline-block; }
+    .field .dot.ok{ background:var(--ok); box-shadow:0 0 0 2px rgba(34,197,94,.25); }
+    .field .dot.ko{ background:#ef4444; box-shadow:0 0 0 2px rgba(239,68,68,.25); }
     /* STREAM */
     .stream-wrap{ display:flex; flex-direction:column; gap:6px; min-height:0; height:100%; }
     .stream-controls{ flex:0 0 auto; }
@@ -100,7 +120,7 @@
     tbody tr:hover { background:#121a2d; }
     .num{ text-align:right; font-variant-numeric: tabular-nums; }
     .idrow.active{ background: rgba(34,197,94,.08); }
-    .scroll{ overflow:auto; }
+    .scroll{ overflow:auto; position:relative; } /* crea il contenitore di clipping per gli sticky */
 
     /* ICONCINE */
     .ico { display:inline-block; width:16px; height:16px; border-radius:4px; border:1px solid #3a445a; background:#0f172a; text-align:center; line-height:16px; font-size:11px; }
@@ -275,16 +295,14 @@
         <!-- Health&Stats: compatto -->
         <section class="card" id="cardHealth" data-min="420">
           <h2>Health & Stats</h2>
-          <div class="small muted" style="margin-bottom:6px; display:flex; gap:8px; align-items:center;">
-            <button id="btnHs">refresh</button><span id="hsTs"></span>
-          </div>
-          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; min-height:0; flex:1;">
-            <div class="scroll" style="min-height:0;">
-              <table><thead><tr><th colspan="2">/health</th></tr></thead><tbody id="tbHealth"></tbody></table>
-            </div>
-            <div class="scroll" style="min-height:0;">
-              <table><thead><tr><th colspan="2">/stats</th></tr></thead><tbody id="tbStats"></tbody></table>
-            </div>
+          <div class="statusbar">
+            <button id="btnHs" class="small">refresh</button>
+            <span class="muted small" id="hsTs"></span>
+            <span class="field"><span id="hsCamDot" class="dot"></span><b>camera</b><span id="hsCam" class="val">—</span></span>
+            <span class="field"><b>size</b><span id="hsSize" class="val">—</span></span>
+            <span class="field"><b>since</b><span id="hsSince" class="val">—</span></span>
+            <span class="field"><b>lastUpdate</b><span id="hsLast" class="val">—</span></span>
+            <span class="field"><b>fps</b><span id="hsFps" class="val">—</span></span>
           </div>
         </section>
       </div>
@@ -402,12 +420,18 @@
         $('kpiSize').textContent = Array.isArray(h.size) ? `${h.size[0]}×${h.size[1]}` : '—';
         $('kpiUptime').textContent = fmtUptime(s.uptimeSec);
         if (Array.isArray(h.size)) capInfo.textContent = `· ${h.size[0]}×${h.size[1]} @≈${h.fps ?? '—'}fps`;
-        $('tbHealth').innerHTML = kvRows({ ok:h.ok, camera:h.camera, fps:h.fps, size:h.size?.join('×'), since:h.since, version:h.version });
-        $('tbStats').innerHTML  = kvRows({ framesTotal:s.framesTotal, lastUpdate:s.lastUpdate, lastFps:s.lastFps, cameraOk:s.cameraOk });
-        $('hsTs').textContent = 'aggiornato: ' + ts();
+        // statusbar compatta
+        $('hsCamDot').className = 'dot ' + (h.ok ? 'ok' : 'ko');
+        $('hsCam').textContent  = h.camera ?? '—';
+        $('hsSize').textContent = Array.isArray(h.size) ? `${h.size[0]}×${h.size[1]}` : '—';
+        $('hsSince').textContent = h.since ?? '—';
+        $('hsLast').textContent  = s.lastUpdate ?? '—';
+        $('hsFps').textContent   = (s.lastFps ?? h.fps ?? '—');
+        $('hsTs').textContent    = 'aggiornato: ' + ts();
       } catch (e) {
-        $('tbHealth').innerHTML = `<tr><td colspan="2" class="muted">errore /health</td></tr>`;
-        $('tbStats').innerHTML  = `<tr><td colspan="2" class="muted">errore /stats</td></tr>`;
+        $('hsCamDot').className = 'dot ko';
+        $('hsCam').textContent  = '—'; $('hsSize').textContent='—'; $('hsSince').textContent='—'; $('hsLast').textContent='—'; $('hsFps').textContent='—';
+        $('hsTs').textContent   = 'errore';
       }
     }
 

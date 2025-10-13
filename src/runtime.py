@@ -63,6 +63,12 @@ def _resolve_and_log_models() -> dict:
         print("[ONNXRUNTIME] NOT AVAILABLE")
     return models
 
+def _log_init(name: str, info: dict, path: str, ok: bool, extra: str = "") -> None:
+    kind = (info.get("kind", "none") if info else "none").upper()
+    path_eff = path or "-"
+    status = "OK" if ok else "DISABLED"
+    tail = f" {extra}" if extra else ""
+    print(f"[INIT] {name:<12} kind={kind:<8} path={path_eff} status={status}{tail}")
 
 # == Init modulari ==
 
@@ -91,30 +97,30 @@ def init_age_gender(cfg, models):
         cls_min_face_px=int(getattr(cfg, "cls_min_face_px", 64)),
         cls_min_conf=float(getattr(cfg, "cls_min_conf", 0.35)),
     )
+    _log_init("AgeGender", models["genderage"], mp, bool(getattr(clsf, "enabled", False)))
     return clsf
 
 def init_face_detector(cfg, models):
-    # YuNet: ONNX only (per ora)
+    mp = _pick_path(models["face"]) if models["face"]["exists"] else ""
+    det = None
     if models["face"]["exists"] and models["face"]["kind"] == "onnx":
-        return YuNetDetector(
-            model_path=_pick_path(models["face"]),
+        det = YuNetDetector(
+            model_path=mp,
             score_th=getattr(cfg, "detector_score_th", 0.8),
             nms_iou=getattr(cfg, "detector_nms_iou", 0.3),
             top_k=getattr(cfg, "detector_top_k", 5000),
             backend_id=getattr(cfg, "detector_backend", 0),
             target_id=getattr(cfg, "detector_target", 0),
         )
-    if models["face"]["exists"] and models["face"]["kind"] == "openvino":
-        print("[INFO] Trovato face detector OpenVINO, ma non ancora supportato in YuNet → ignorato.")
-    else:
-        print("[INFO] Face detector non trovato.")
-    return None
+    _log_init("FaceDetector", models["face"], mp, det is not None, extra="(note: OpenVINO YuNet non supportato)" if (models["face"]["exists"] and models["face"]["kind"] == "openvino") else "")
+    return det
 
 def init_person_detector(cfg, models):
-    # YOLO: ONNX only (per ora)
+    mp = _pick_path(models["person"]) if models["person"]["exists"] else ""
+    det = None
     if models["person"]["exists"] and models["person"]["kind"] == "onnx":
-        return PersonDetector(
-            model_path=_pick_path(models["person"]),
+        det = PersonDetector(
+            model_path=mp,
             img_size=int(getattr(cfg, "person_img_size", 640)),
             score_th=float(getattr(cfg, "person_score_th", 0.26)),
             iou_th=float(getattr(cfg, "person_iou_th", 0.45)),
@@ -122,25 +128,26 @@ def init_person_detector(cfg, models):
             backend_id=int(getattr(cfg, "person_backend", 0)),
             target_id=int(getattr(cfg, "person_target", 0)),
         )
-    if models["person"]["exists"] and models["person"]["kind"] == "openvino":
-        print("[INFO] Person detector OpenVINO trovato ma non ancora supportato → ignorato.")
-    else:
-        print("[INFO] Person detector non trovato.")
-    return None
+    _log_init("PersonDet", models["person"], mp, det is not None,
+              extra="(note: OpenVINO non supportato)" if (models["person"]["exists"] and models["person"]["kind"] == "openvino") else "")
+    return det
+
 def init_face_reid(cfg, models):
-    # Accetta ONNX o OpenVINO IR (priorità già gestita dal resolver)
+    # Accetta ONNX o OpenVINO IR
     reid_enabled = bool(getattr(cfg, "reid_enabled", True))
-    if not reid_enabled or not models["reid_face"]["exists"]:
+    mp = _pick_path(models["reid_face"]) if models["reid_face"]["exists"] else ""
+    if not reid_enabled or not mp:
         reid = FaceReID("", 1.0, 1, 1)
     else:
         reid = FaceReID(
-            model_path=_pick_path(models["reid_face"]),
+            model_path=mp,
             similarity_th=float(getattr(cfg, "reid_similarity_th", 0.365)),
             cache_size=int(getattr(cfg, "reid_cache_size", 1000)),
             memory_ttl_sec=int(getattr(cfg, "reid_memory_ttl_sec", 600)),
             bank_size=int(getattr(cfg, "reid_bank_size", 10)),
         )
-    print(f"[OK] ReID enabled={getattr(reid,'enabled',False)} | backend={getattr(reid,'backend_name','?')}")
+    _log_init("FaceReID", models["reid_face"], mp, bool(getattr(reid, "enabled", False)),
+              extra=f"backend={getattr(reid, 'backend_name', '?')}")
     return reid
 
 def init_body_reid(cfg, models, reid):
@@ -154,10 +161,13 @@ def init_body_reid(cfg, models, reid):
         )
         if hasattr(reid, "set_body_backend"):
             reid.set_body_backend(backend)
-        print("[OK] Body ReID backend caricato.")
+        _log_init("BodyReID", models["reid_body"], mp, bool(getattr(backend, "enabled", True)),
+                  extra=f"mode={getattr(backend, 'mode', '?')}")
         return backend
-    print("[INFO] Body ReID non trovato.")
+    _log_init("BodyReID", models["reid_body"], "", False)
     return None
+
+# -------------------- Runtime libs --------------------
 try:
     import onnxruntime as _ort  # noqa
     _ORT_OK = True
@@ -691,5 +701,4 @@ def run_pipeline(state: HealthState, cfg) -> None:
         except Exception:
             pass
         cv2.destroyAllWindows()
-
 

@@ -58,7 +58,22 @@
       overflow:auto; background:#0b0e14; position:relative;
       border-radius:8px; border:1px solid #2a3142;
     }
-    #stream{ width:100%; height:100%; object-fit:contain; border-radius:8px; }
+    /* wrapper con rapporto 16:9 */
+    .stream-aspect{ width:100%; position:relative; }
+    .stream-aspect::before{ content:""; display:block; padding-top:56.25%; } /* 16:9 = 9/16 = 56.25% */
+    #stream{
+      position:absolute; inset:0;
+      width:100%; height:100%; object-fit:contain; border-radius:8px;
+    }
+
+    /* --- Modalità verticale ---
+       - la riga stream non è più fissa: si adatta al suo contenuto 16:9
+       - niente “quadrato” e niente spazio vuoto sopra/sotto
+    */
+    @media (orientation: portrait){
+      #main{ grid-template-rows: auto auto 1fr; }      /* riga stream = auto */
+      .stream-box{ height:auto !important; flex:0 0 auto; }  /* niente vh fissi */
+    }
     .chips{ display:flex; gap:6px; flex-wrap:nowrap; overflow:auto; }
     .chip{ display:inline-flex; gap:6px; align-items:center; padding:2px 8px; border:1px solid #2a3142; border-radius:999px; background:#0d1320; }
 
@@ -137,8 +152,7 @@
     /* opzionale: limite max alle card per evitare che righino oltre */
     .card { max-height: 100%; }
 
-    /* Dimensione stream: verticale più alto, orizzontale meno invasivo */
-    @media (orientation: portrait){ .stream-box{ height: 70vh; } }
+    /* Dimensione stream (solo landscape resta “alto”): */
     @media (orientation: landscape){ .stream-box{ height: 44vh; } }
 
     /* Breakpoint di sicurezza: sotto 800px, colonna singola comunque */
@@ -181,7 +195,10 @@
           <span class="muted">doppio-click o tasto <b>F</b></span>
         </div>
         <div class="stream-box" id="streamBox">
-          <img id="stream" src="/debug/stream" alt="debug stream" />
+          <!-- wrapper con aspect-ratio 16:9 -->
+          <div class="stream-aspect">
+            <img id="stream" src="/debug/stream" alt="debug stream" />
+          </div>
         </div>
         <div class="chips small" id="activeChips"><span class="muted">active: —</span></div>
       </div>

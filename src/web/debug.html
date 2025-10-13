@@ -305,14 +305,12 @@
 
         <!-- Health&Stats: compatto -->
         <section class="card" id="cardHealth" data-min="420">
-          <h2>Health & Stats</h2>
-          <div class="statusbar">
+          <div class="statusbar" style="margin-top:-2px;">
             <button id="btnHs" class="small">refresh</button>
             <span class="muted small" id="hsTs"></span>
             <span class="field"><span id="hsCamDot" class="dot"></span><b>camera</b><span id="hsCam" class="val">—</span></span>
             <span class="field"><b>size</b><span id="hsSize" class="val">—</span></span>
             <span class="field"><b>since</b><span id="hsSince" class="val">—</span></span>
-            <span class="field"><b>lastUpdate</b><span id="hsLast" class="val">—</span></span>
             <span class="field"><b>fps</b><span id="hsFps" class="val">—</span></span>
           </div>
         </section>
@@ -436,7 +434,6 @@
         $('hsCam').textContent  = h.camera ?? '—';
         $('hsSize').textContent = Array.isArray(h.size) ? `${h.size[0]}×${h.size[1]}` : '—';
         $('hsSince').textContent = h.since ?? '—';
-        $('hsLast').textContent  = s.lastUpdate ?? '—';
         $('hsFps').textContent   = (s.lastFps ?? h.fps ?? '—');
         $('hsTs').textContent    = 'aggiornato: ' + ts();
       } catch (e) {

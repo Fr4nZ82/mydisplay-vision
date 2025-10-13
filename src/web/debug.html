@@ -106,10 +106,21 @@
 
       /* riga stream si adatta al suo contenuto 16:9, niente spazi vuoti */
       .stream-box{ height:auto !important; flex:0 0 auto; }
+      /* ---- Limiti di altezza SOLO in verticale ----
+         ReID non può occupare tutto: il corpo scorre entro il limite.
+         Gli Aggregati hanno un limite più basso.
+      */
+      #cardReid .scroll{
+        max-height: 38vh;   /* ~2/5 dello schermo */
+      }
+      #cardMetrics .scroll{
+        max-height: 26vh;   /* sufficiente per 8–10 righe */
+      }
+      #cardHealth .statusbar{ margin-bottom: 4px; } /* compattiamo un filo */
     }
 
     /* Chips */
-    .cips{ display:flex; gap:6px; flex-wrap:nowrap; overflow:auto; }
+    .chips{ display:flex; gap:6px; flex-wrap:nowrap; overflow:auto; }
     .chip{ display:inline-flex; gap:6px; align-items:center; padding:2px 8px; border:1px solid #2a3142; border-radius:999px; background:#0d1320; }
 
     /* Tabelle */

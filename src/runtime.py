@@ -127,12 +127,10 @@ def init_person_detector(cfg, models):
     else:
         print("[INFO] Person detector non trovato.")
     return None
-
 def init_face_reid(cfg, models):
-    # Accetta ora sia ONNX che OpenVINO (IR .xml)
+    # Accetta ONNX o OpenVINO IR (priorità già gestita dal resolver)
     reid_enabled = bool(getattr(cfg, "reid_enabled", True))
     if not reid_enabled or not models["reid_face"]["exists"]:
-        # disabilitato o nessun modello trovato
         reid = FaceReID("", 1.0, 1, 1)
     else:
         reid = FaceReID(
@@ -693,4 +691,5 @@ def run_pipeline(state: HealthState, cfg) -> None:
         except Exception:
             pass
         cv2.destroyAllWindows()
+
 

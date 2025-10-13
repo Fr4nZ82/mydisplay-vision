@@ -98,6 +98,7 @@ _DEFAULTS: Dict[str, Any] = {
     "reid_memory_ttl_sec": 600,
     "reid_bank_size": 10,
     "reid_require_face_if_available": True,
+    "debug_reid_verbose": False,
 
     # --- Body ReID ---
     "body_reid_input_w": 128,

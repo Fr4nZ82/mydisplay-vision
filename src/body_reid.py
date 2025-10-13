@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 """
 BodyReID: estrazione embedding corpo da crop persona (BGR).
-Supporta modelli tipici:
-- OSNet (es. osnet_x0_25_msmt17.onnx): input 256x128 RGB, mean/std ImageNet
-- Intel OMZ person-reidentification-retail-0288.onnx: input 256x128 BGR (float), scala 0..1 tipica
+Supporta i modelli richiesti:
+- OSNet (es. osnet_x0_25_msmt17.onnx): input 128x256 (W×H) RGB, normalizzazione ImageNet (mean/std)
+- Intel OMZ person-reidentification-retail-0288.xml: input 128x256 (W×H) BGR, scala 0..1
 
 Heuristica:
 - Se il path contiene 'osnet' => usa RGB + normalizzazione ImageNet
-- Altrimenti usa BGR + scala 0..1
+- Altrimenti usa BGR + scala 0..1 (adatta ai modelli Intel retail)
 
 Output: vettore 1D float32 L2-normalizzato, oppure None se fallisce.
 """
@@ -35,27 +35,50 @@ class BodyReID:
         name = os.path.basename(model_path).lower()
         self.mode = "osnet" if "osnet" in name else "intel"
         ext = os.path.splitext(model_path)[1].lower()
-        self._backend = "onnx"
+        self._backend = "disabled"
         self._ov_compiled = None
+        self.enabled = False
 
-        if ext == ".xml" and _OVCore is not None:
+        # Prova OpenVINO se è un IR .xml
+        if ext == ".xml":
+            if _OVCore is None:
+                # OpenVINO non disponibile per IR
+                self._backend = "disabled"
+            else:
+                try:
+                    core = _OVCore()
+                    model = core.read_model(model_path)
+                    self._ov_compiled = core.compile_model(model, "CPU")
+                    # Se possibile, rileva la dimensione input dal modello (NCHW)
+                    try:
+                        ishape = list(self._ov_compiled.inputs[0].shape)
+                        # shape tipica: [1, 3, H, W]
+                        if len(ishape) == 4:
+                            H, W = int(ishape[2]), int(ishape[3])
+                            # nota: qui manteniamo convenzione (W,H)
+                            self.in_w, self.in_h = W, H
+                    except Exception:
+                        pass
+                    self._backend = "openvino"
+                    self.enabled = True
+                except Exception:
+                    self._ov_compiled = None
+                    self._backend = "disabled"
+
+        # Altrimenti prova ONNX via OpenCV DNN
+        elif ext == ".onnx":
             try:
-                core = _OVCore()
-                model = core.read_model(model_path)
-                self._ov_compiled = core.compile_model(model, "CPU")
-                self._backend = "openvino"
-            except Exception:
-                self._ov_compiled = None
+                self.net = cv2.dnn.readNetFromONNX(model_path)
+                try:
+                    self.net.setPreferableBackend(int(backend_id))
+                    self.net.setPreferableTarget(int(target_id))
+                except Exception:
+                    pass
                 self._backend = "onnx"
-
-        if self._backend == "onnx":
-            self.net = cv2.dnn.readNetFromONNX(model_path)
-            try:
-                self.net.setPreferableBackend(int(backend_id))
-                self.net.setPreferableTarget(int(target_id))
+                self.enabled = True
             except Exception:
-                pass
-
+                self._backend = "disabled"
+                self.enabled = False
 
     @staticmethod
     def _l2_normalize(x: np.ndarray, eps: float = 1e-9) -> np.ndarray:
@@ -63,6 +86,8 @@ class BodyReID:
         return (x / n).astype(np.float32)
 
     def embed(self, person_bgr: np.ndarray) -> Optional[np.ndarray]:
+        if not self.enabled:
+            return None
         if person_bgr is None or person_bgr.size == 0:
             return None
         h, w = person_bgr.shape[:2]
@@ -70,7 +95,7 @@ class BodyReID:
             return None
         try:
             if self._backend == "onnx":
-                # (preprocess identico a prima; osnet in RGB normalizzato, intel in BGR/255)
+                # osnet in RGB normalizzato, intel in BGR/255
                 if self.mode == "osnet":
                     img = cv2.cvtColor(person_bgr, cv2.COLOR_BGR2RGB)
                     img = cv2.resize(img, (self.in_w, self.in_h), interpolation=cv2.INTER_LINEAR)
@@ -88,7 +113,7 @@ class BodyReID:
                 vec = np.asarray(out).reshape(-1).astype(np.float32)
                 return self._l2_normalize(vec)
 
-            else:  # OpenVINO
+            elif self._backend == "openvino" and self._ov_compiled is not None:
                 if self.mode == "osnet":
                     img = cv2.cvtColor(person_bgr, cv2.COLOR_BGR2RGB)
                     img = cv2.resize(img, (self.in_w, self.in_h), interpolation=cv2.INTER_LINEAR)
@@ -107,3 +132,4 @@ class BodyReID:
                 return self._l2_normalize(vec)
         except Exception:
             return None
+        return None

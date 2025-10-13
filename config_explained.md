@@ -13,7 +13,6 @@ Questo documento elenca e spiega tutte le proprietà utilizzabili in config.json
     - [Associazione volto→persona](#associazione-voltopersona)
   - [🧠 Classificatore Età/Genere](#-classificatore-etàgenere)
     - [Modello combinato (consigliato)](#modello-combinato-consigliato)
-    - [Modelli separati](#modelli-separati)
     - [Throttle / caching classificazione](#throttle--caching-classificazione)
   - [🚶 ROI / Tripwire](#-roi--tripwire)
   - [🔁 Re-Identification (ReID)](#-re-identification-reid)
@@ -126,7 +125,6 @@ Ambito: mantenere un ID coerente per persona/volto tra frame consecutivi (SORT�
 
 Ambito: detection primaria delle persone. Se presente, il tracker usa queste bbox; altrimenti fallback sui volti.
 
-- person_model_path (default: ""): path ONNX (vuoto = disattivato).
 - person_img_size (default: 640): lato di input (px) usato per il resize “letterbox” prima dell’inferenza YOLO. Valori maggiori rilevano soggetti più piccoli e lontani ma aumentano latenza/uso di CPU/GPU e RAM (costo ~quadratico); valori minori velocizzano ma possono perdere oggetti piccoli. Deve essere multiplo di 32 (es. 320, 416, 512, 576, 640, 736, 768). Non modifica la risoluzione del frame di acquisizione; le bbox sono riportate alla dimensione originale. Linee guida: CPU/RTSP instabile 416–576; GPU 640–768; soggetti molto piccoli/scene ampie 736–768.
 - person_score_th (default: 0.26): soglia di confidenza minima per mantenere una detection YOLO (objectness × class). Più bassa = più recall (rileva anche soggetti piccoli/lontani) ma più falsi positivi e costo NMS; più alta = più precisione ma rischio di perdere volti/persona deboli o parziali. Linee guida: 0.22–0.30 su CPU/RTSP instabile; 0.30–0.40 su scene pulite/GPU. Regolare insieme a person_iou_th.
 - person_iou_th (default: 0.45): soglia IoU per NMS (sopprime box con IoU > soglia). Valori più bassi rendono l’NMS più aggressivo (meno duplicati ma possibile soppressione di persone molto vicine/overlap); valori più alti conservano più box (utile in folle/overlap, ma aumentano duplicati e costo). Range tipico 0.40–0.55; 0.45 è un buon compromesso.
@@ -134,18 +132,26 @@ Ambito: detection primaria delle persone. Se presente, il tracker usa queste bbo
 - person_backend (default: 0): backend DNN OpenCV per l’inferenza YOLO. Valori comuni: 0=DEFAULT/OPENCV (CPU), 5=CUDA (NVIDIA), 2=OpenVINO/Inference Engine (Intel). Deve essere coerente con person_target.
 - person_target (default: 0): target di esecuzione per il backend scelto. Valori comuni: 0=CPU, 6=CUDA, 7=CUDA_FP16, 1=OPENCL, 2=OPENCL_FP16, 3=MYRIAD (NCS2). Esempi: 0/0 per CPU; 5/6 o 5/7 per GPU NVIDIA; 2/0 (CPU) o 2/3 (MYRIAD) con OpenVINO.
 
+Nota: il modello persone si carica automaticamente se presente in:
+- models/person/openvino/
+- models/person/onnx/
+
+
 ### Face detector (YuNet)
 
 Ambito: detection volti per età/genere e ancoraggio ReID via embedding facciale.
 
-- detector_model (default: "").
-- detector_score_th (default: 0.8).
-- detector_nms_iou (default: 0.3).
-- detector_top_k (default: 5000).
-- detector_backend (default: 0), detector_target (default: 0).
+- detector_score_th (default: 0.8)
+- detector_nms_iou (default: 0.3)
+- detector_top_k (default: 5000)
+- detector_backend (default: 0), detector_target (default: 0)
 - detector_resize_width (default: 640): resize solo per detection.
-- Compat: blocco opzionale "yunet": { onnx_path, score_th, nms_th, top_k } viene mappato su detector_* se non impostati.
 
+Nota: il modello volto si carica automaticamente se presente in:
+- models/face/openvino/
+- models/face/onnx/
+
+Compat reverse mapping “yunet” rimosso: non sono supportati campi legacy come yunet: { onnx_path, ... } nel config.
 ### Associazione volto→persona
 
 Ambito: collegare un volto alla bbox persona più plausibile per usare volto nel classifier/ReID.
@@ -159,31 +165,32 @@ Ambito: collegare un volto alla bbox persona più plausibile per usare volto nel
 
 ## 🧠 Classificatore Età/Genere
 
-Ambito: stima genere/età da crop volto via ONNX Runtime.
+Ambito: stima genere/età da crop volto via modello unico (combinato).
 
-### Proprietà comuni (sia modello combinato che doppio modello)
-- age_buckets (default: ["0-13","14-24","25-34","35-44","45-54","55-64","65+"]).
-- cls_min_face_px (default: 64): lato minimo volto per inferenza.
-- cls_min_conf (default: 0.35): soglia confidenza genere.
-- cls_interval_ms (default: 300): throttle per track.
-
+- age_buckets (default: ["0-13","14-24","25-34","35-44","45-54","55-64","65+"])
+- cls_min_face_px (default: 64)
+- cls_min_conf (default: 0.35)
+- cls_interval_ms (default: 300)
 ### Modello combinato (consigliato)
 
-Ambito: un solo ONNX che predice età+genere.
+Ambito: un unico modello che predice età+genere. Il path non è in config: metti il file in:
+- models/genderage/openvino/
+- models/genderage/onnx/
 
-- combined_model_path (default: "").
-- combined_input_size (default: [96, 96]).
-- combined_bgr_input (default: true).
-- combined_scale01 (default: false).
-- combined_age_scale (default: 100.0).
-- combined_gender_order (default: ["female","male"]).
+- combined_input_size (default: [62, 62] per Intel 0013; adatta se usi altri modelli).
+- combined_bgr_input (default: true): true se il modello si aspetta BGR, false per RGB.
+- combined_scale01 (default: false): se true normalizza l’input a [0..1] (alcuni modelli lo richiedono). Per Intel 0013 tenere false (usa 0..255 float).
+- combined_age_scale (default: 100.0): scala per convertire l’uscita età normalizzata in anni (Intel 0013 usa age/100 → moltiplica per 100).
+- combined_gender_order (default: ["female","male"]): ordine dei logit/probabilità in uscita, se il modello li espone in ordine diverso inverti qui.
 
-### Modelli separati
+Nota: non sono supportati path modello in config (es. combined_model_path, age_model_path, gender_model_path): l’auto‑load cerca i file nelle cartelle sopra.
 
-Ambito: due ONNX distinti, uno per età e uno per genere.
 
-- age_model_path (default: "").
-- gender_model_path (default: "").
+### Throttle / caching classificazione
+
+- cls_interval_ms limita la frequenza di inferenza per track/ID.
+- È attiva una cache per evitare ricalcoli ravvicinati sullo stesso volto.
+
 
 ## 🚶 ROI / Tripwire
 
@@ -207,20 +214,21 @@ La pipeline usa embedding di volto e corpo. La policy assegna l’ID più plausi
 ### Face ReID (SFace/ArcFace)
 
 - reid_enabled (default: true): abilita ReID volto.
-- reid_model_path (default: "").
-- reid_similarity_th (default: 0.365): soglia match volto.
-- reid_require_face_if_available (default: true): preferisci ID già ancorati da volto.
+- reid_similarity_th (default: 0.365): soglia match volto (similarità coseno su embedding L2-normalizzati).
+- reid_require_face_if_available (default: true): preferisci match con ID che hanno già embedding volto.
 - reid_cache_size (default: 1000): dimensione cache ID.
 - reid_memory_ttl_sec (default: 600): TTL memoria (eviction/presence).
 - reid_bank_size (default: 10): max feature per banca/ID.
+- debug_reid_verbose (default: false): log dettagliato delle decisioni di assegnazione.
 
 ### Body ReID (OSNet / Intel OMZ)
 
-- body_reid_model_path (default: ""): path modello corpo (vuoto = disattivo).
-- body_reid_input_w (default: 128), body_reid_input_h (default: 256): input W×H.
-- body_reid_backend (default: 0), body_reid_target (default: 0): backend/target DNN.
-- body_only_th (default: 0.80): soglia match solo-corpo.
+- body_reid_input_w (default: 128), body_reid_input_h (default: 256): dimensione input W×H per il crop corpo.
+- body_reid_backend (default: 0), body_reid_target (default: 0): backend/target DNN per modelli ONNX (OpenCV DNN). Per modelli OpenVINO (.xml) questi campi non sono usati.
+- body_only_th (default: 0.80): soglia match basata solo su embedding corpo (cosine).
 - reid_allow_body_seed (default: true): consenti creare ID con sola feature corpo quando nessun match è affidabile.
+
+Modelli supportati/testati: OSNet (osnet_x0_25_msmt17.onnx) e Intel OMZ (person-reidentification-retail-0288.xml). Il modello viene caricato automaticamente da models/reid_body/(onnx|openvino)/.
 
 ### Politiche di fusione e soglie
 
@@ -271,6 +279,9 @@ Output per finestra: counts per sesso (male/female/unknown) e per fascia d’et�
 ## 🧪 Troubleshooting
 
 - JSON non supporta commenti: non usare // o /* */ in config.json.
-- Età/genere sempre unknown: verifica combined_model_path o modelli separati; controlla cls_min_face_px e illuminazione.
+- Età/genere sempre unknown: verifica che un modello combinato sia presente in models/genderage/(openvino|onnx)/; controlla cls_min_face_px e i parametri combined_* coerenti con il tuo modello; verifica illuminazione e dimensione dei volti.
+- Face detector non attivo: verifica la presenza di un YuNet ONNX in models/face/onnx/ (YuNet in OpenVINO non è usato in questo ramo).
+- ReID volto/corpo non attivo: verifica i modelli in models/reid_face/onnx/ e models/reid_body/(onnx|openvino)/.
 - ReID che collassa su un unico ID: alza body_only_th (es. 0.85), mantieni reid_require_face_if_available=true, calibra reid_similarity_th.
 - RTSP instabile: alza timeout/buffer, riduci person_img_size, verifica rete.
+

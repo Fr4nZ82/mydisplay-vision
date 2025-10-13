@@ -1,5 +1,5 @@
 {
-  "camera": 0,
+  "camera": "rtsp://admin:admin@192.168.1.11:554/streamtype=0",
   "width": 1920,
   "height": 1080,
   "target_fps": 10.0,
@@ -41,9 +41,9 @@
   "age_buckets": ["0-13", "14-24", "25-34", "35-44", "45-54", "55-64", "65+"],
   "cls_min_face_px": 64,
   "cls_min_conf": 0.35,
-  "cls_interval_ms": 300,
+  "cls_interval_ms": 400,
 
-  "combined_input_size": [96, 96],
+  "combined_input_size": [62, 62],
   "combined_bgr_input": true,
   "combined_scale01": false,
   "combined_age_scale": 100.0,

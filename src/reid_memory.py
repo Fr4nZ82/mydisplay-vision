@@ -25,6 +25,12 @@ import time
 import numpy as np
 import cv2
 
+try:
+    from openvino.runtime import Core as _OVCore
+except Exception:
+    _OVCore = None
+
+
 
 def _cosine_sim(a: np.ndarray, b: np.ndarray) -> float:
     if a is None or b is None:
@@ -99,7 +105,6 @@ class _BackendArcFaceONNX:
     """
     def __init__(self, model_path: str):
         self.net = cv2.dnn.readNetFromONNX(model_path)
-        # Se disponibile, preferisci ONNXRuntime / OpenVINO via DNN backends (facoltativo)
         try:
             self.net.setPreferableBackend(cv2.dnn.DNN_BACKEND_DEFAULT)
             self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
@@ -108,12 +113,11 @@ class _BackendArcFaceONNX:
 
     @staticmethod
     def _preprocess(face_bgr: np.ndarray) -> np.ndarray:
-        # Converte a RGB, resize 112x112, normalizza a [-1, 1] circa
         img = cv2.cvtColor(face_bgr, cv2.COLOR_BGR2RGB)
         img = cv2.resize(img, (112, 112), interpolation=cv2.INTER_LINEAR)
         img = img.astype(np.float32)
         img = (img - 127.5) / 128.0
-        blob = np.transpose(img, (2, 0, 1))[None, ...]  # NCHW
+        blob = np.transpose(img, (2, 0, 1))[None, ...]
         return blob
 
     def feat(self, face_bgr_any: np.ndarray) -> Optional[np.ndarray]:
@@ -127,6 +131,42 @@ class _BackendArcFaceONNX:
             return _l2_normalize(vec)
         except Exception:
             return None
+
+
+class _BackendArcFaceOV:
+    """
+    Backend ArcFace per OpenVINO IR (.xml+.bin), es. GhostFaceNet_W1.3_S1_ArcFace.
+    Preprocess: RGB 112x112, (img - 127.5)/128.0 → NCHW, output L2-normalizzato.
+    """
+    def __init__(self, model_path: str):
+        if _OVCore is None:
+            raise RuntimeError("OpenVINO runtime non disponibile")
+        core = _OVCore()
+        model = core.read_model(model_path)
+        self.compiled = core.compile_model(model, "CPU")
+        # opzionale: potremmo leggere shape input per validazione
+
+    @staticmethod
+    def _preprocess(face_bgr: np.ndarray) -> np.ndarray:
+        img = cv2.cvtColor(face_bgr, cv2.COLOR_BGR2RGB)
+        img = cv2.resize(img, (112, 112), interpolation=cv2.INTER_LINEAR)
+        img = img.astype(np.float32)
+        img = (img - 127.5) / 128.0
+        blob = np.transpose(img, (2, 0, 1))[None, ...]
+        return blob
+
+    def feat(self, face_bgr_any: np.ndarray) -> Optional[np.ndarray]:
+        if face_bgr_any is None or face_bgr_any.size == 0:
+            return None
+        try:
+            blob = self._preprocess(face_bgr_any)
+            res = self.compiled([blob])
+            out = list(res.values())[0]
+            vec = np.asarray(out).reshape(-1).astype(np.float32)
+            return _l2_normalize(vec)
+        except Exception:
+            return None
+
 
 
 class FaceReID:
@@ -165,27 +205,29 @@ class FaceReID:
         self.alias: Dict[int, int] = {}
 
 
-        # Scegli backend: prova SFace, altrimenti ArcFace DNN
+                # Scegli backend: SFace (OpenCV contrib), ArcFace ONNX (OpenCV DNN) o ArcFace OpenVINO IR
         self.backend_name = "unknown"
         self.backend = None
         try:
-            # euristica: se il nome contiene 'sface' prova SFace prima
-            if "sface" in (model_path or "").lower():
+            name_l = (model_path or "").lower()
+            ext = (model_path.split(".")[-1].lower() if model_path else "")
+            if "sface" in name_l:
+                # Prova SFace (opencv-contrib)
                 self.backend = _BackendSFace(model_path)
                 self.backend_name = "sface"
+            elif ext == "xml" and _OVCore is not None:
+                # ArcFace OpenVINO (es. GhostFaceNet ArcFace IR)
+                self.backend = _BackendArcFaceOV(model_path)
+                self.backend_name = "arcface_ov"
             else:
-                # prova lo SFace comunque (se disponibile) — se fallisce, usa DNN
-                try:
-                    self.backend = _BackendSFace(model_path)
-                    self.backend_name = "sface"
-                except Exception:
-                    self.backend = _BackendArcFaceONNX(model_path)
-                    self.backend_name = "arcface_onnx"
+                # ArcFace ONNX via OpenCV DNN
+                self.backend = _BackendArcFaceONNX(model_path)
+                self.backend_name = "arcface_onnx"
         except Exception:
-            # fallback duro: disabilita
             self.backend = None
             self.enabled = False
             self.backend_name = "disabled"
+
 
         # ---- NEW: body re-id backend + policy ----
         self.body_backend = None     # oggetto con .embed(bgr)->vec

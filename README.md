@@ -9,7 +9,7 @@ Tutto avviene in locale (nessun frame o video inviato a server), nel rispetto de
 
 - Rilevamento volto e persona (YuNet + YOLO ONNX opzionale)
 - Tracking leggero con ID stabili (SORT‑lite)
-- Classificazione età/genere (modello combinato o modelli separati, ONNX Runtime)
+- Classificazione età/genere (modello combinato, ONNX/OpenVINO)
 - Re‑Identification opzionale (SFace/ArcFace) con memoria e TTL per deduplicare passaggi
 - Tripwire normalizzata con conteggio direzionale a2b/b2a
 - Aggregazione per finestre temporali (minute windows) e API HTTP di lettura
@@ -75,16 +75,23 @@ pip install -r requirements.txt
 
 ## Modelli
 
-La cartella models/ include alcuni modelli di esempio. Imposta i percorsi nel file di configurazione.
+I modelli non si configurano più tramite path nel config. Basta copiarli nelle cartelle corrette sotto models/ e il sistema li risolve automaticamente (precedenza: OpenVINO → ONNX):
 
-- Face detector (default): models/face_detection_yunet_2023mar.onnx
-- Person detector (opzionale): es. models/yolov8n.onnx
-- ReID (facce): models/face_recognition_sface_2021dec.onnx oppure arcfaceresnet100-8.onnx
-- Età/Genere (combinato consigliato):
-  - Intel age‑gender‑recognition‑retail‑0013.onnx (imposta combined_model_path)
-  - In alternativa InsightFace genderage.onnx (imposta combined_model_path a models/genderage.onnx)
+Struttura attesa:
+- models/face/(openvino|onnx)/           → face detector (YuNet ONNX supportato; OpenVINO segnalato ma non usato per YuNet)
+- models/person/(openvino|onnx)/         → person detector (ONNX supportato; OpenVINO segnalato ma non usato)
+- models/genderage/(openvino|onnx)/      → classificatore età/genere combinato (ONNX o OpenVINO)
+- models/reid_face/(openvino|onnx)/      → ReID volto (ONNX supportato; OpenVINO non usato dal backend corrente)
+- models/reid_body/(openvino|onnx)/      → ReID corpo (ONNX o OpenVINO)
 
-Se il modello combinato non è presente, il sistema prova i modelli separati age.onnx e gender.onnx (se configurati). In assenza di modelli, le etichette restano "unknown".
+Note di supporto attuali:
+- Face detector: serve un ONNX YuNet in models/face/onnx/.
+- Person detector: serve un ONNX YOLO in models/person/onnx/ (classe person).
+- Età/Genere: modello combinato in models/genderage/(openvino|onnx)/; es. Intel age-gender-recognition-retail-0013 (62x62) o InsightFace genderage.
+- ReID volto: ONNX in models/reid_face/onnx/ (SFace/ArcFace).
+- ReID corpo: ONNX/OpenVINO in models/reid_body/(onnx|openvino)/. Supportati e testati: OSNet (osnet_x0_25_msmt17.onnx) e Intel OMZ (person-reidentification-retail-0288.xml).
+
+Se un modello non è presente nella cartella attesa, la relativa funzionalità viene disattivata e le etichette restano "unknown".
 
 
 ## Configurazione
@@ -95,7 +102,7 @@ Il servizio legge un file JSON (default: config.json). Tutte le opzioni sono doc
 Punti chiave:
 - camera, width/height, target_fps
 - detector_* (YuNet), person_* (YOLO)
-- combined_model_path o age_model_path/gender_model_path
+- Modelli: auto-discovery in models/<categoria>/(openvino|onnx); nessun path in config
 - tracker_*, roi_tripwire/roi_direction/roi_band_px
 - count_mode: "presence" oppure "tripwire"
 - reid_* e parametri appearance_*
@@ -108,7 +115,6 @@ Esempio minimo di override:
   "camera": 0,
   "api_host": "127.0.0.1",
   "api_port": 8080,
-  "combined_model_path": "models/genderage.onnx",  // oppure modello Intel
   "count_mode": "tripwire",
   "roi_tripwire": [[0.1, 0.5], [0.9, 0.5]],
   "roi_direction": "both"
@@ -158,7 +164,7 @@ Dedup: count_dedup_ttl_sec evita doppi conteggi della stessa persona entro un in
 - src/face_detector.py: YuNet wrapper (OpenCV FaceDetectorYN)
 - src/person_detector.py: YOLO(ONNX) per classe "person" (opzionale)
 - src/tracker.py: SORT‑lite con smoothing etichette
-- src/age_gender.py: classificatore età/genere (combinato o separati)
+- src/age_gender.py: classificatore età/genere (modello combinato)
 - src/reid_memory.py: memoria Re‑ID (SFace/ArcFace) con policy apparenza
 - src/aggregator.py: finestre minute, conteggio per genere/età e direzione
 - src/utils_vis.py: utility di visualizzazione (overlay, tripwire, IoU)
@@ -197,8 +203,8 @@ Planned:
 
 ## Troubleshooting
 
-- Face detector non trova modelli → verifica detector_model nel config e la presenza del file ONNX
-- Età/genere sempre unknown → verifica combined_model_path o i modelli separati; controlla cls_min_face_px
+- Face detector non attivo → verifica che un modello YuNet ONNX sia in models/face/onnx/ e che detector_score_th non sia troppo alto
+- Età/genere sempre unknown → verifica che un modello combinato sia in models/genderage/(openvino|onnx)/ e che i parametri combined_* siano coerenti (es. input 62x62 per Intel 0013); controlla cls_min_face_px
 - Stream /debug lento → abbassa debug_resize_width e/o debug_stream_fps
 - RTSP instabile → regola rtsp_* (timeout, reconnect) e riduci person_img_size
 

@@ -132,7 +132,8 @@ def init_face_detector(cfg, models):
 def init_person_detector(cfg, models):
     mp = _pick_path(models["person"]) if models["person"]["exists"] else ""
     det = None
-    if models["person"]["exists"] and models["person"]["kind"] == "onnx":
+    if models["person"]["exists"]:
+        # PersonDetector ora auto-seleziona il backend in base all'estensione (.onnx vs .xml)
         det = PersonDetector(
             model_path=mp,
             img_size=int(getattr(cfg, "person_img_size", 640)),
@@ -141,13 +142,17 @@ def init_person_detector(cfg, models):
             max_det=int(getattr(cfg, "person_max_det", 200)),
             backend_id=int(getattr(cfg, "person_backend", 0)),
             target_id=int(getattr(cfg, "person_target", 0)),
+            ov_device=str(getattr(cfg, "person_ov_device", "CPU")),
         )
-    _log_init("PersonDet", models["person"], mp, det is not None, extra="(note: OpenVINO non supportato)" if (models["person"]["exists"] and models["person"]["kind"] == "openvino") else "")
+    # Extra: mostra auto-kind basato sull'estensione del path
+    auto_kind = "OV" if (mp.lower().endswith(".xml")) else (models["person"].get("kind", "?").upper() if mp else "-")
+    _log_init("PersonDet", models["person"], mp, det is not None, extra=f"(auto kind={auto_kind})")
     try:
-        log_event("INIT_PERSON_DET", enabled=det is not None, kind=models["person"].get("kind"), path=mp)
+        log_event("INIT_PERSON_DET", enabled=det is not None, kind=auto_kind, path=mp)
     except Exception:
         pass
     return det
+
 
 def init_face_reid(cfg, models):
     # Accetta ONNX o OpenVINO IR
@@ -258,12 +263,13 @@ def run_pipeline(state: HealthState, cfg) -> None:
     # Salva config/aggregator nello state per gli endpoint nuovi (/config, /metrics/minute)
     state.set_config_obj(cfg)
 
-        # Aggregatore (metrics)
+            # Aggregatore (metrics)
     aggregator = MinuteAggregator(
         window_sec=int(getattr(cfg, "metrics_window_sec", 60)),
         retention_min=int(getattr(cfg, "metrics_retention_min", 120)),
-                )
+    )
     state.set_aggregator(aggregator)
+
 
     # Pipeline start log
     try:

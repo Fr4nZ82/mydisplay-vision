@@ -129,9 +129,12 @@ def init_person_detector(cfg, models):
     return None
 
 def init_face_reid(cfg, models):
-    # ArcFace/SFace: ONNX only
+    # Accetta ora sia ONNX che OpenVINO (IR .xml)
     reid_enabled = bool(getattr(cfg, "reid_enabled", True))
-    if reid_enabled and models["reid_face"]["exists"] and models["reid_face"]["kind"] == "onnx":
+    if not reid_enabled or not models["reid_face"]["exists"]:
+        # disabilitato o nessun modello trovato
+        reid = FaceReID("", 1.0, 1, 1)
+    else:
         reid = FaceReID(
             model_path=_pick_path(models["reid_face"]),
             similarity_th=float(getattr(cfg, "reid_similarity_th", 0.365)),
@@ -139,11 +142,7 @@ def init_face_reid(cfg, models):
             memory_ttl_sec=int(getattr(cfg, "reid_memory_ttl_sec", 600)),
             bank_size=int(getattr(cfg, "reid_bank_size", 10)),
         )
-    else:
-        if reid_enabled and models["reid_face"]["exists"] and models["reid_face"]["kind"] == "openvino":
-            print("[INFO] Face ReID OpenVINO trovato ma backend attuale richiede ONNX → ignorato.")
-        reid = FaceReID("", 1.0, 1, 1)
-    print(f"[OK] ReID enabled={getattr(reid,'enabled',False)}")
+    print(f"[OK] ReID enabled={getattr(reid,'enabled',False)} | backend={getattr(reid,'backend_name','?')}")
     return reid
 
 def init_body_reid(cfg, models, reid):
@@ -161,7 +160,6 @@ def init_body_reid(cfg, models, reid):
         return backend
     print("[INFO] Body ReID non trovato.")
     return None
-
 try:
     import onnxruntime as _ort  # noqa
     _ORT_OK = True
@@ -211,7 +209,7 @@ def open_rtsp(url: str, cfg):
         cap.set(cv2.CAP_PROP_BUFFERSIZE, float(getattr(cfg, "rtsp_buffer_frames", 2)))
     except Exception:
         pass
-
+    
     return cap
 
 # -------------------- Pipeline --------------------
@@ -229,7 +227,7 @@ def run_pipeline(state: HealthState, cfg) -> None:
     aggregator = MinuteAggregator(
         window_sec=int(getattr(cfg, "metrics_window_sec", 60)),
         retention_min=int(getattr(cfg, "metrics_retention_min", 120)),
-    )
+                )
     state.set_aggregator(aggregator)
 
     # Tracker
@@ -255,7 +253,7 @@ def run_pipeline(state: HealthState, cfg) -> None:
             require_face_if_available=bool(getattr(cfg, "reid_require_face_if_available", True)),
             body_only_th=float(getattr(cfg, "body_only_th", 0.80)),
             allow_body_seed=bool(getattr(cfg, "reid_allow_body_seed", True)),
-        )
+                            )
         if hasattr(reid, "set_debug"):
             reid.set_debug(bool(getattr(cfg, "debug_reid_verbose", False)))
     except Exception:
@@ -290,7 +288,7 @@ def run_pipeline(state: HealthState, cfg) -> None:
             reid.on_evict = _on_evict
         except Exception:
             pass
-    
+
     # Dedup per i conteggi (tripwire): non riconteggiare lo stesso global_id entro TTL
     from collections import OrderedDict
     count_seen = OrderedDict()
@@ -327,7 +325,6 @@ def run_pipeline(state: HealthState, cfg) -> None:
 
         if not cap or not cap.isOpened():
             raise RuntimeError(f"Cannot open {'RTSP' if is_rtsp else 'camera'}: {cam_cfg}")
-
     except Exception as e:
         print(f"[FATAL] Impossibile aprire la camera: {e}")
         state.update(camera_ok=False, fps=0.0, width=0, height=0)
@@ -656,10 +653,10 @@ def run_pipeline(state: HealthState, cfg) -> None:
                                 except Exception:
                                     pass
                         # aggiorna prev_center dopo il check
-                        tracker.update_prev_center(tid)
+                    tracker.update_prev_center(tid)
 
                 if count_mode == "tripwire" and isinstance(roi_tripwire, (list, tuple)) and len(roi_tripwire) == 2:
-                  draw_tripwire(vis, (tuple(roi_tripwire[0]), tuple(roi_tripwire[1])), roi_band_px, (255,0,0))
+                    draw_tripwire(vis, (tuple(roi_tripwire[0]), tuple(roi_tripwire[1])), roi_band_px, (255,0,0))
 
                 for t in tracks:
                     tid = t["track_id"]
@@ -696,3 +693,4 @@ def run_pipeline(state: HealthState, cfg) -> None:
         except Exception:
             pass
         cv2.destroyAllWindows()
+

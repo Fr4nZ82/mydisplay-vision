@@ -88,15 +88,8 @@
       .stream-box{ height:auto !important; flex:0 0 auto; }
     }
 
-    /* --- Modalità verticale ---
-       - la riga stream non è più fissa: si adatta al suo contenuto 16:9
-       - niente “quadrato” e niente spazio vuoto sopra/sotto
-    */
-    @media (orientation: portrait){
-      #main{ grid-template-rows: auto auto 1fr; }      /* riga stream = auto */
-      .stream-box{ height:auto !important; flex:0 0 auto; }  /* niente vh fissi */
-    }
-    .chips{ display:flex; gap:6px; flex-wrap:nowrap; overflow:auto; }
+    /* Chips */
+    .cips{ display:flex; gap:6px; flex-wrap:nowrap; overflow:auto; }
     .chip{ display:inline-flex; gap:6px; align-items:center; padding:2px 8px; border:1px solid #2a3142; border-radius:999px; background:#0d1320; }
 
     /* Tabelle */
@@ -136,19 +129,17 @@
     /* wrapper principale a altezza fissa calcolata da JS */
     :root{ --topbar-h: 0px; }
 
-    /* Altezza riga Stream controllata da variabile */
-    :root{
-      --stream-h: 44vh;            /* default (landscape) ~ 1/4-1/3 schermo */
-    }
-    @media (orientation: portrait){
-      :root{ --stream-h: 70vh; }   /* verticale: stream alto */
-    }
+    /* Variabile usata solo in landscape */
+    :root{ --stream-h: 44vh; }
 
-    /* La griglia principale: 1) KPI auto  2) STREAM fisso  3) GRID riempie */
-    #main{
-      height: calc(100vh - var(--topbar-h));
-      display: grid;
-      grid-template-rows: auto var(--stream-h) 1fr;
+    /* Default = portrait: stack flessibile */
+    #main{ height: calc(100vh - var(--topbar-h)); display:flex; flex-direction:column; }
+    /* Landscape: ripristino la griglia a 3 righe */
+    @media (orientation: landscape){
+      #main{
+        display:grid;
+        grid-template-rows: auto var(--stream-h) 1fr;
+      }
     }
 
     /* va bene anche static; l’importante è misurarla e sottrarla */

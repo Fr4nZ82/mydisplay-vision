@@ -28,6 +28,7 @@ from .person_detector import PersonDetector
 from .reid_memory import FaceReID
 from .body_reid import BodyReID
 from .model_resolver import resolve_all
+from .logs import log_event, get_session_id
 
 # == Helpers comuni ==
 def _pick_path(info: dict) -> str:
@@ -61,6 +62,11 @@ def _resolve_and_log_models() -> dict:
         print("[ONNXRUNTIME] AVAILABLE")
     except Exception:
         print("[ONNXRUNTIME] NOT AVAILABLE")
+    # Log modelli risolti (percorsi sintetici)
+    try:
+        log_event("MODEL_RESOLVE", face=models.get("face"), person=models.get("person"), genderage=models.get("genderage"), reid_face=models.get("reid_face"), reid_body=models.get("reid_body"))
+    except Exception:
+        pass
     return models
 
 def _log_init(name: str, info: dict, path: str, ok: bool, extra: str = "") -> None:
@@ -98,6 +104,10 @@ def init_age_gender(cfg, models):
         cls_min_conf=float(getattr(cfg, "cls_min_conf", 0.35)),
     )
     _log_init("AgeGender", models["genderage"], mp, bool(getattr(clsf, "enabled", False)))
+    try:
+        log_event("INIT_AGE_GENDER", enabled=bool(getattr(clsf, "enabled", False)), path=mp)
+    except Exception:
+        pass
     return clsf
 
 def init_face_detector(cfg, models):
@@ -113,6 +123,10 @@ def init_face_detector(cfg, models):
             target_id=getattr(cfg, "detector_target", 0),
         )
     _log_init("FaceDetector", models["face"], mp, det is not None, extra="(note: OpenVINO YuNet non supportato)" if (models["face"]["exists"] and models["face"]["kind"] == "openvino") else "")
+    try:
+        log_event("INIT_FACE_DET", enabled=det is not None, kind=models["face"].get("kind"), path=mp)
+    except Exception:
+        pass
     return det
 
 def init_person_detector(cfg, models):
@@ -128,8 +142,11 @@ def init_person_detector(cfg, models):
             backend_id=int(getattr(cfg, "person_backend", 0)),
             target_id=int(getattr(cfg, "person_target", 0)),
         )
-    _log_init("PersonDet", models["person"], mp, det is not None,
-              extra="(note: OpenVINO non supportato)" if (models["person"]["exists"] and models["person"]["kind"] == "openvino") else "")
+    _log_init("PersonDet", models["person"], mp, det is not None, extra="(note: OpenVINO non supportato)" if (models["person"]["exists"] and models["person"]["kind"] == "openvino") else "")
+    try:
+        log_event("INIT_PERSON_DET", enabled=det is not None, kind=models["person"].get("kind"), path=mp)
+    except Exception:
+        pass
     return det
 
 def init_face_reid(cfg, models):
@@ -146,8 +163,11 @@ def init_face_reid(cfg, models):
             memory_ttl_sec=int(getattr(cfg, "reid_memory_ttl_sec", 600)),
             bank_size=int(getattr(cfg, "reid_bank_size", 10)),
         )
-    _log_init("FaceReID", models["reid_face"], mp, bool(getattr(reid, "enabled", False)),
-              extra=f"backend={getattr(reid, 'backend_name', '?')}")
+    _log_init("FaceReID", models["reid_face"], mp, bool(getattr(reid, "enabled", False)), extra=f"backend={getattr(reid, 'backend_name', '?')}")
+    try:
+        log_event("INIT_FACE_REID", enabled=bool(getattr(reid, "enabled", False)), path=mp, backend=getattr(reid, 'backend_name', '?'))
+    except Exception:
+        pass
     return reid
 
 def init_body_reid(cfg, models, reid):
@@ -161,10 +181,17 @@ def init_body_reid(cfg, models, reid):
         )
         if hasattr(reid, "set_body_backend"):
             reid.set_body_backend(backend)
-        _log_init("BodyReID", models["reid_body"], mp, bool(getattr(backend, "enabled", True)),
-                  extra=f"mode={getattr(backend, 'mode', '?')}")
+        _log_init("BodyReID", models["reid_body"], mp, bool(getattr(backend, "enabled", True)), extra=f"mode={getattr(backend, 'mode', '?')}")
+        try:
+            log_event("INIT_BODY_REID", enabled=True, path=mp, mode=getattr(backend, 'mode', '?'))
+        except Exception:
+            pass
         return backend
     _log_init("BodyReID", models["reid_body"], "", False)
+    try:
+        log_event("INIT_BODY_REID", enabled=False)
+    except Exception:
+        pass
     return None
 
 # -------------------- Runtime libs --------------------
@@ -231,12 +258,25 @@ def run_pipeline(state: HealthState, cfg) -> None:
     # Salva config/aggregator nello state per gli endpoint nuovi (/config, /metrics/minute)
     state.set_config_obj(cfg)
 
-    # Aggregatore (metrics)
+        # Aggregatore (metrics)
     aggregator = MinuteAggregator(
         window_sec=int(getattr(cfg, "metrics_window_sec", 60)),
         retention_min=int(getattr(cfg, "metrics_retention_min", 120)),
                 )
     state.set_aggregator(aggregator)
+
+    # Pipeline start log
+    try:
+        log_event(
+            "PIPELINE_START",
+            count_mode=str(getattr(cfg, "count_mode", "presence")),
+            tripwire=getattr(cfg, "roi_tripwire", None),
+            roi_direction=getattr(cfg, "roi_direction", None),
+            roi_band_px=int(getattr(cfg, "roi_band_px", 12)),
+        )
+    except Exception:
+        pass
+
 
     # Tracker
     tracker = init_tracker(cfg)
@@ -290,6 +330,11 @@ def run_pipeline(state: HealthState, cfg) -> None:
         except Exception:
             gender, age_bucket = "unknown", "unknown"
         aggregator.add_presence_event(gender=gender, age_bucket=age_bucket, global_id=gid, now=last_ts)
+        try:
+            log_event("PRESENCE", gid=int(gid), gender=gender, age=age_bucket)
+        except Exception:
+            pass
+
 
     if hasattr(reid, "on_evict"):
         try:
@@ -335,9 +380,18 @@ def run_pipeline(state: HealthState, cfg) -> None:
             raise RuntimeError(f"Cannot open {'RTSP' if is_rtsp else 'camera'}: {cam_cfg}")
     except Exception as e:
         print(f"[FATAL] Impossibile aprire la camera: {e}")
+        try:
+            log_event("CAMERA_OPEN_FAIL", camera=str(getattr(cfg, 'camera', cam_cfg)), error=str(e))
+        except Exception:
+            pass
         state.update(camera_ok=False, fps=0.0, width=0, height=0)
         sys.exit(1)
     print(f"[OK] Camera aperta (index={getattr(cfg,'camera',0)}). Ctrl+C per uscire.")
+
+    try:
+        log_event("CAMERA_OPEN_OK", camera=str(getattr(cfg,'camera',0)), is_rtsp=bool(is_rtsp))
+    except Exception:
+        pass
 
     # Loop vars
     frame_count = 0
@@ -384,14 +438,25 @@ def run_pipeline(state: HealthState, cfg) -> None:
                             cap.release()
                         except Exception:
                             pass
+                        try:
+                            log_event("RTSP_RECONNECT", url=str(cam_cfg), after_fail=rtsp_fail_count)
+                        except Exception:
+                            pass
                         time.sleep(rtsp_reconnect)
                         cap = open_rtsp(cam_cfg, cfg)
                         rtsp_fail_count = 0
                     else:
                         time.sleep(0.05)
                 else:
+                    # webcam locale: evita spam, logga un warning ogni tanto
+                    if frame_count % 30 == 0:
+                        try:
+                            log_event("CAMERA_FRAME_MISS")
+                        except Exception:
+                            pass
                     time.sleep(0.05)
                 continue
+
             else:
                 # reset fallimenti su frame valido
                 if isinstance(getattr(cfg, "camera", 0), str) and str(getattr(cfg, "camera")).lower().startswith("rtsp://"):
@@ -410,6 +475,10 @@ def run_pipeline(state: HealthState, cfg) -> None:
                 h, w = frame.shape[:2]
                 fps = frame_count / (now - last_report)
                 print(f"[health] fps={fps:.1f} | size={w}x{h} | camera=OK | tracks={len(tracker.tracks)} | cls={'ON' if classifier.enabled else 'OFF'}")
+                try:
+                    log_event("HEALTH", fps=round(fps,2), size=[w,h], tracks=len(tracker.tracks), cls=bool(getattr(classifier,'enabled',False)))
+                except Exception:
+                    pass
                 state.update(camera_ok=True, fps=fps, width=w, height=h, frames_inc=frame_count)
                 frame_count = 0
                 last_report = now
@@ -461,15 +530,29 @@ def run_pipeline(state: HealthState, cfg) -> None:
                 # subito dopo aver settato person_dets e face_dets
                 if frame_count % int(max(1, 1*float(getattr(cfg, "debug_stream_fps", 5)))) == 0:
                     print(f"[dbg] person_dets={len(person_dets)} face_dets={len(face_dets)}")
+                    try:
+                        log_event("DETECT", persons=len(person_dets), faces=len(face_dets))
+                    except Exception:
+                        pass
 
                 # Scegli input del tracker: persone se disponibili, altrimenti fallback ai volti
+                track_src = "person" if person_dets else "face"
                 if person_dets:
                     detections = [[bx, by, bw, bh, sc] for (bx, by, bw, bh), sc in person_dets]
                 else:
                     detections = [[bx, by, bw, bh, sc] for (bx, by, bw, bh), sc in face_dets]
+                try:
+                    log_event("TRACK_INPUT", src=track_src, det=len(detections))
+                except Exception:
+                    pass
+
 
                 # Tracking (su persone o volti)
                 tracks = tracker.update(detections)
+                try:
+                    log_event("TRACK", active=len(tracks))
+                except Exception:
+                    pass
 
                 # Associa volti ai track persona
                 face_assoc = associate_faces_to_tracks(
@@ -510,6 +593,10 @@ def run_pipeline(state: HealthState, cfg) -> None:
                         gid = reid.canon(gid)
                         tstate["global_id"] = gid
                         tstate["assigned_with_face"] = (matched_face is not None)
+                        try:
+                            log_event("REID_ASSIGN", tid=int(tid), gid=int(gid), withFace=bool(matched_face is not None))
+                        except Exception:
+                            pass
 
                     # salva anche il face bbox corrente (per classificazione)
                     tstate["face_bbox"] = matched_face  # None o (x,y,w,h)
@@ -604,6 +691,10 @@ def run_pipeline(state: HealthState, cfg) -> None:
                                     new_gid = reid.canon(new_gid)
                                     if new_gid != tstate.get("global_id", tid):
                                         tstate["global_id"] = new_gid
+                                        try:
+                                            log_event("REID_CORRECT", tid=int(tid), new_gid=int(new_gid))
+                                        except Exception:
+                                            pass
                                     tstate["assigned_with_face"] = True
                                     tracker.tracks[tid] = tstate
                             except Exception:
@@ -654,6 +745,10 @@ def run_pipeline(state: HealthState, cfg) -> None:
                                         track_id=gid,
                                         now=now_ts,
                                     )
+                                    try:
+                                        log_event("TRIPWIRE_CROSS", gid=int(gid), dir=dir_tag, gender=gender, age=age_bucket)
+                                    except Exception:
+                                        pass
                                 # mantieni "viva" la memoria reid (touch se disponibile)
                                 try:
                                     if hasattr(reid, "touch"):
@@ -692,6 +787,10 @@ def run_pipeline(state: HealthState, cfg) -> None:
                 if ok_jpg:
                     state.set_debug_jpeg(buf.tobytes())
                 last_stream_t = now
+                try:
+                    log_event("FRAME_OUT", jpeg=len(buf) if ok_jpg else 0)
+                except Exception:
+                    pass
 
     except KeyboardInterrupt:
         print("\n[EXIT] Interrotto dall'utente.")

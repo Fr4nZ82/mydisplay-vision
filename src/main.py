@@ -26,6 +26,7 @@ from src.config import AppConfig
 from src.api import build_app
 from src.state import HealthState
 from src.runtime import run_pipeline
+from src.logs import setup_logging, log_event
 
 
 def _print_versions():
@@ -57,6 +58,10 @@ def main():
     print("== MyDisplay Vision (API + Pipeline) ==")
     _print_versions()
 
+    # Setup logging strutturato
+    setup_logging(cfg)
+    log_event("APP_START", py=sys.version, platform=platform.platform())
+
     # Stato condiviso API <-> Pipeline
     state = HealthState(stream_fps=getattr(cfg, "debug_stream_fps", 5.0))
 
@@ -68,12 +73,14 @@ def main():
     api_thr = threading.Thread(target=_serve_api, name="api-server", daemon=True)
     api_thr.start()
     print(f"[API] /health, /stats, /debug su http://{getattr(cfg,'api_host','127.0.0.1')}:{getattr(cfg,'api_port',8765)}/debug")
+    log_event("API_START", host=getattr(cfg, 'api_host', '127.0.0.1'), port=int(getattr(cfg, 'api_port', 8765)))
 
     # Avvia la pipeline (blocking finché non esci)
     try:
         run_pipeline(state, cfg)
     except KeyboardInterrupt:
         print("\n[EXIT] Interrotto dall'utente.")
+        log_event("APP_EXIT", reason="KeyboardInterrupt")
     finally:
         # La pipeline chiude la camera; l'API thread è daemon e si fermerà all'uscita del processo.
         pass

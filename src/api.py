@@ -15,6 +15,7 @@ from typing import Any, Optional
 from datetime import datetime, timezone
 from pathlib import Path
 import time
+from .logs import log_event
 
 WEB_DIR = Path(__file__).resolve().parent / "web"   # -> src/web
 DEBUG_HTML = WEB_DIR / "debug.html"
@@ -146,6 +147,14 @@ def build_app(state) -> FastAPI:
         )
 
     # ---------------------- NUOVI Endpoints ----------------------
+
+    @app.get("/log/mark")
+    def log_mark(msg: str = "", tag: str = ""):
+        try:
+            log_event("MARK", msg=str(msg), tag=str(tag))
+            return {"ok": True, "msg": msg, "tag": tag, "ts": datetime.now(timezone.utc).isoformat()}
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
     @app.get("/metrics/minute")
     def metrics_minute(last: int = 10, includeCurrent: int = 1):

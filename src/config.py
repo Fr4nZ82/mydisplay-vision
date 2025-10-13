@@ -42,6 +42,13 @@ _DEFAULTS: Dict[str, Any] = {
     "rtsp_reconnect_sec": 2.0,
     "rtsp_max_failures": 60,
 
+    # --- Logging strutturato ---
+    "log_enabled": True,
+    "log_dir": "logs",
+    "log_level": "INFO",           # DEBUG | INFO | WARNING | ERROR
+    "log_rotate_mb": 10,
+    "log_keep": 5,
+
     # --- Counting mode ---
     "count_mode": "presence",       # "presence" | "tripwire"
     "presence_ttl_sec": 600,

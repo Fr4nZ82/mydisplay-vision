@@ -1,11 +1,17 @@
 {
   "camera": "rtsp://admin:admin@192.168.1.11:554/streamtype=0",
-  "width": 1920,
-  "height": 1080,
+  "width": 1280,
+  "height": 720,
   "target_fps": 10.0,
   "debug_enabled": true,
   "debug_stream_fps": 5,
-  "debug_resize_width": 960,
+  "debug_resize_width": 640,
+
+  "log_enabled": true,
+  "log_dir": "logs",
+  "log_level": "INFO",
+  "log_rotate_mb": 10,
+  "log_keep": 5,
 
   "api_host": "127.0.0.1",
   "api_port": 8080,
@@ -21,7 +27,7 @@
   "tracker_min_hits": 4,
   "tracker_iou_th": 0.35,
 
-  "person_img_size": 640,
+  "person_img_size": 512,
   "person_score_th": 0.28,
   "person_iou_th": 0.40,
   "person_max_det": 200,
@@ -33,13 +39,13 @@
   "detector_top_k": 5000,
   "detector_backend": 0,
   "detector_target": 0,
-  "detector_resize_width": 640,
+  "detector_resize_width": 320,
 
   "face_assoc_iou_th": 0.20,
   "face_assoc_center_in": true,
 
   "age_buckets": ["0-13", "14-24", "25-34", "35-44", "45-54", "55-64", "65+"],
-  "cls_min_face_px": 64,
+  "cls_min_face_px": 48,
   "cls_min_conf": 0.35,
   "cls_interval_ms": 400,
 

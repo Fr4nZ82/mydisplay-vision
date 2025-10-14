@@ -19,6 +19,7 @@ from .logs import log_event
 
 WEB_DIR = Path(__file__).resolve().parent / "web"   # -> src/web
 DEBUG_HTML = WEB_DIR / "debug.html"
+REPORTS_HTML = WEB_DIR / "reports.html"
 
 def _uptime_sec(since_iso: str | None) -> int | None:
     if not since_iso:
@@ -101,6 +102,12 @@ def build_app(state) -> FastAPI:
         # Fallback (se il file non esiste ancora)
         return HTMLResponse("<h1>MyDisplay Vision — Debug</h1><p>Manca src/web/debug.html</p>")
     
+    @app.get("/reports", response_class=HTMLResponse)
+    def reports_page() -> HTMLResponse:
+        if REPORTS_HTML.exists():
+            return HTMLResponse(REPORTS_HTML.read_text(encoding="utf-8"))
+        return HTMLResponse("<h1>Report</h1><p>Manca src/web/reports.html</p>")
+
     @app.get("/debug/data")
     def debug_data():
         try:

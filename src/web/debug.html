@@ -208,10 +208,12 @@
 <body>
   <div class="topbar">
     <h1 class="title">MyDisplay Vision — Debug</h1>
-    <div class="actions">
+        <div class="actions">
       <button id="btnFs">Schermo intero</button>
       <button id="btnOpenCfg">Impostazioni</button>
+      <button id="btnReport">Report</button>
     </div>
+
   </div>
 
   <div id="main">
@@ -549,11 +551,16 @@
         $('tbCfg').innerHTML = '<tr><td colspan="2" class="muted">errore /config</td></tr>';
       }
     }
-    const cfgModal = $('cfgModal'), btnOpenCfg = $('btnOpenCfg'), btnCloseCfg = $('btnCloseCfg'), cfgBackdrop = $('cfgBackdrop');
+        const cfgModal = $('cfgModal'), btnOpenCfg = $('btnOpenCfg'), btnCloseCfg = $('btnCloseCfg'), cfgBackdrop = $('cfgBackdrop');
     function openCfg(){ cfgModal.classList.add('show'); cfgModal.setAttribute('aria-hidden','false'); loadConfigIntoModal(); }
     function closeCfg(){ cfgModal.classList.remove('show'); cfgModal.setAttribute('aria-hidden','true'); }
     btnOpenCfg.onclick = openCfg; btnCloseCfg.onclick = closeCfg; cfgBackdrop.onclick = closeCfg; $('btnCfgReload').onclick = loadConfigIntoModal;
     document.addEventListener('keydown', (e)=>{ if(e.key==='Escape' && cfgModal.classList.contains('show')) closeCfg(); });
+
+    // Report button -> open /reports in new tab
+    const btnReport = $('btnReport');
+    if (btnReport) btnReport.onclick = () => window.open('/reports', '_blank');
+
 
     // --- blocco altezza: niente scroll pagina, solo interni ---
     function resizeMain(){

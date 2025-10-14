@@ -29,7 +29,7 @@ _DEFAULTS: Dict[str, Any] = {
 
     "debug_enabled": False,
     "debug_stream_fps": 5,
-    "debug_resize_width": 960,  # 0 = nessun resize
+    # "debug_resize_width": 960,  # rimosso: non ridimensioniamo più per il debug
 
     "api_host": "127.0.0.1",
     "api_port": 8080,
@@ -49,6 +49,8 @@ _DEFAULTS: Dict[str, Any] = {
     "log_rotate_mb": 10,
     "log_keep": 5,
 
+    "proc_resize_width": 0,  # 0 = usa frame pieno; >0 = ridimensiona il frame di lavoro
+
     # --- Counting mode ---
     "count_mode": "presence",       # "presence" | "tripwire"
     "presence_ttl_sec": 600,
@@ -60,6 +62,12 @@ _DEFAULTS: Dict[str, Any] = {
     "person_max_det": 200,
     "person_backend": 0,            # OpenCV DNN backend id
     "person_target": 0,             # OpenCV DNN target id
+    # Filtri aggiuntivi lato post-process
+    # area minima del box persona in pixel (w*h). 0 per disabilitare
+    "person_min_box_area": 0,
+    # Zone da ignorare (lista di poligoni). Coordinate normalizzate [0..1] rispetto a (w,h) del frame
+    # Esempio: [ [[0.6,0.0],[1.0,0.0],[1.0,1.0],[0.6,1.0]] ]
+    "person_ignore_zone": [],
 
     # Associazione volto->persona
     "face_assoc_iou_th": 0.20,
@@ -148,3 +156,4 @@ class AppConfig:
         for k in _DEFAULTS.keys():
             out[k] = getattr(self, k, _DEFAULTS[k])
         return out
+

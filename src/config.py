@@ -56,7 +56,7 @@ _DEFAULTS: Dict[str, Any] = {
 
     # --- Person detector (solo parametri: il modello è auto) ---
     "person_img_size": 640,
-    "person_score_th": 0.26,
+    "person_score_th": 0.30,
     "person_iou_th": 0.45,
     "person_max_det": 200,
     "person_backend": 0,            # OpenCV DNN backend id
@@ -69,16 +69,16 @@ _DEFAULTS: Dict[str, Any] = {
     "person_ignore_zone": [],
 
     # Associazione volto->persona
-    "face_assoc_iou_th": 0.20,
+    "face_assoc_iou_th": 0.25,
     "face_assoc_center_in": True,
 
     # --- Face detector (YuNet, solo parametri) ---
-    "detector_score_th": 0.8,
+    "detector_score_th": 0.75,
     "detector_nms_iou": 0.3,
     "detector_top_k": 5000,
     "detector_backend": 0,
     "detector_target": 0,
-    "detector_resize_width": 640,
+    "detector_resize_width": 800,
     "debug_hide_ignored": True,  # se true, /debug non mostra i volti ignorati (score<th o fuori area persona)
     "debug_mark_centers": False,  # se true, /debug marca il centro del volto con un + (utile per associare a persona)
     "debug_show_ignore_rects": True,  # se false, non disegna poligoni/rect di ignore nella pagina di debug
@@ -110,11 +110,11 @@ _DEFAULTS: Dict[str, Any] = {
 
     # --- Face Re-Identification ---
     "reid_enabled": True,
-    "reid_similarity_th": 0.365,
+    "reid_similarity_th": 0.38,
     "reid_cache_size": 1000,
     "reid_memory_ttl_sec": 600,
     "reid_bank_size": 10,
-    "reid_require_face_if_available": True,
+    "reid_require_face_if_available": False,
     "debug_reid_verbose": False,
 
     # --- Body ReID ---
@@ -122,7 +122,7 @@ _DEFAULTS: Dict[str, Any] = {
     "body_reid_input_h": 256,
     "body_reid_backend": 0,
     "body_reid_target": 0,
-    "body_only_th": 0.80,
+    "body_only_th": 0.65,
     "reid_allow_body_seed": True,
 
     # --- Dedup conteggi ---

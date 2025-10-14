@@ -315,12 +315,70 @@ class FaceReID:
         info['hits'] += 1
         self.mem[pid] = info
 
+    def _merge_ids(self, winner: int, loser: int) -> int:
+        """Unisce i dati del loser nel winner e cancella il loser. Ritorna l'ID vincente."""
+        if winner == loser:
+            return self.canon(winner)
+        w = self.mem.get(winner)
+        l = self.mem.get(loser)
+        if w is None or l is None:
+            # se uno non esiste, ritorna quello esistente
+            if w is not None:
+                return self.canon(winner)
+            if l is not None:
+                return self.canon(loser)
+            return self.canon(winner)
+        # merge feats
+        for f in l.get('feats', []) or []:
+            try:
+                w.setdefault('feats', []).append(np.asarray(f, dtype=np.float32))
+            except Exception:
+                pass
+        # limit bank size
+        if len(w.get('feats', [])) > self.bank_size:
+            w['feats'] = w['feats'][-self.bank_size:]
+        # merge body
+        for b in l.get('body', []) or []:
+            try:
+                w.setdefault('body', []).append(np.asarray(b, dtype=np.float32))
+            except Exception:
+                pass
+        if len(w.get('body', [])) > self.bank_size:
+            w['body'] = w['body'][-self.bank_size:]
+        # merge meta
+        wm = w.setdefault('meta', {'gender_hist': {}, 'age_hist': {}})
+        lm = l.get('meta', {}) or {}
+        for k, v in (lm.get('gender_hist', {}) or {}).items():
+            wm['gender_hist'][k] = int(wm['gender_hist'].get(k, 0)) + int(v)
+        for k, v in (lm.get('age_hist', {}) or {}).items():
+            wm['age_hist'][k] = int(wm['age_hist'].get(k, 0)) + int(v)
+        # timestamps / hits
+        try:
+            w['last'] = max(float(w.get('last', 0.0)), float(l.get('last', 0.0)))
+        except Exception:
+            pass
+        try:
+            w['created'] = min(float(w.get('created', w.get('last', 0.0))), float(l.get('created', l.get('last', 0.0))))
+        except Exception:
+            pass
+        try:
+            w['hits'] = int(w.get('hits', 1)) + int(l.get('hits', 0))
+        except Exception:
+            pass
+        # salva e cancella loser
+        self.mem[winner] = w
+        # mappa alias per sicurezza, così canon() redirige eventuali riferimenti obsoleti
+        self.alias[loser] = winner
+        if loser in self.mem:
+            del self.mem[loser]
+        if self.debug:
+            print(f"[ReID] MERGE loser=G{loser} -> winner=G{winner}")
+        return self.canon(winner)
 
     def _sim_to_pid_body(self, pid: int, vec: np.ndarray) -> float:
         info = self.mem.get(pid)
         if not info:
             return -1.0
-
 
         bank = info.get('body', [])
         if not bank or vec is None:
@@ -395,16 +453,21 @@ class FaceReID:
             cand.append((pid, fs, bs, fused))
         cand.sort(key=lambda r: r[3], reverse=True)
 
+
+
+
         # ------------- Decisioni -------------
         chosen = None
         reason = "new"
 
+        # Pre-selezione best per face/body (senza gating) per gestire merge
+        best_face = max(cand, key=lambda r: r[1]) if (feat is not None and cand) else None
+        best_body_all = max(cand, key=lambda r: r[2]) if (body_vec is not None and cand) else None
+
         # A) Se c'è volto e supera soglia → match per volto
-        if feat is not None:
-            best_face = max(cand, key=lambda r: r[1]) if cand else None
-            if best_face and best_face[1] >= self.sim_th:
-                chosen = int(best_face[0])
-                reason = f"face>=th({best_face[1]:.3f})"
+        if best_face and best_face[1] >= self.sim_th:
+            chosen = int(best_face[0])
+            reason = f"face>=th({best_face[1]:.3f})"
 
         # B) Altrimenti, prova corpo con gate sugli ID ancorati (face) se configurato
         if chosen is None and body_vec is not None:
@@ -415,6 +478,14 @@ class FaceReID:
             if best_body and best_body[2] >= self.body_only_th:
                 chosen = int(best_body[0])
                 reason = f"body>=th({best_body[2]:.3f})"
+
+        # C) Merge se in questo frame abbiamo sia face che body forti ma su ID diversi: vince la faccia
+        if best_face and best_body_all and best_face[0] != best_body_all[0] and best_face[1] >= self.sim_th and best_body_all[2] >= self.body_only_th:
+            winner = int(best_face[0])
+            loser = int(best_body_all[0])
+            winner = self._merge_ids(winner, loser)
+            chosen = winner
+            reason = f"merge(face_win) f={best_face[1]:.3f} b={best_body_all[2]:.3f}"
 
         # D) Se nulla supera le soglie → crea nuovo
         if chosen is None:
@@ -437,12 +508,25 @@ class FaceReID:
         if feat is not None:
             self._add_feat(pid, feat, now)
         if body_vec is not None:
-            self._add_body(pid, body_vec, now)
+            # Se il match è guidato dal volto ma il corpo non somiglia al body attuale,
+            # sostituiamo la banca corpo con il nuovo embedding per correggere dati sbagliati
+            try:
+                sim_b = self._sim_to_pid_body(pid, body_vec)
+            except Exception:
+                sim_b = -1.0
+            if sim_b < self.body_only_th:
+                info = self.mem.get(pid)
+                if info is not None:
+                    info['body'] = [np.asarray(body_vec, dtype=np.float32)]
+                    info['last'] = now
+                    info['hits'] = int(info.get('hits', 0)) + 1
+                    self.mem[pid] = info
+            else:
+                self._add_body(pid, body_vec, now)
         if self.debug:
             top3 = cand[:3]
             print(f"[ReID] MATCH -> G{pid} | reason={reason} top3={[(p, round(f,3), round(b,3)) for (p,f,b,_) in top3]}")
         return pid
-
 
     def touch(self, global_id: int, now_ts: Optional[float] = None):
         now = time.time() if now_ts is None else now_ts

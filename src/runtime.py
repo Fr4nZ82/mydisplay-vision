@@ -628,11 +628,13 @@ def run_pipeline(state: HealthState, cfg) -> None:
                         face_crop = proc[max(0, fy): fy + fh, max(0, fx): fx + fw]
                     else:
                         face_crop = None
+                        
+                    body_crop_to_pass = person_crop if track_src == "person" else None
                     try:
                         gid = reid.assign_global_id(
                             face_bgr_crop=face_crop,
                             kps5=None,
-                            body_bgr_crop=person_crop
+                            body_bgr_crop=body_crop_to_pass
                         )
                     except TypeError:
                         # fallback: chiamate legacy
@@ -724,11 +726,14 @@ def run_pipeline(state: HealthState, cfg) -> None:
                         try:
                             if not tstate.get("assigned_with_face", False):
                                 try:
+                                    body_crop2 = (
+                                        proc[max(0, t["bbox"][1]): t["bbox"][1] + t["bbox"][3],
+                                             max(0, t["bbox"][0]): t["bbox"][0] + t["bbox"][2]]
+                                    ) if track_src == "person" else None
                                     new_gid = reid.assign_global_id(
                                         face_bgr_crop=face_roi,
                                         kps5=None,
-                                        body_bgr_crop=proc[max(0, t["bbox"][1]): t["bbox"][1] + t["bbox"][3],
-                                                           max(0, t["bbox"][0]): t["bbox"][0] + t["bbox"][2]],
+                                        body_bgr_crop=body_crop2,
                                     )
                                 except TypeError:
                                     new_gid = reid.assign_global_id(face_bgr_crop=face_roi, kps5=None)

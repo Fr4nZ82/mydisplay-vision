@@ -85,6 +85,11 @@ _DEFAULTS: Dict[str, Any] = {
     "debug_reid_verbose": False,
     # Nascondi in overlay i track non ancora "committati" (niente GID e niente gender valido)
     "debug_hide_uncommitted": True,
+    # --- Logging granularità ---
+    "debug_log_frame_out": False,         # se true, logga ogni FRAME_OUT (molto verboso)
+    "debug_log_detect": True,             # se true, logga eventi DETECT
+    "debug_log_detect_zero": False,       # se true, logga anche quando persons=0 e faces=0
+    "debug_log_health": True,             # se false, non logga HEALTH periodico
 
     # --- Classifier: MODELLO COMBINATO (age+gender) ---
     # Default coerenti con Intel age-gender-recognition-retail-0013:

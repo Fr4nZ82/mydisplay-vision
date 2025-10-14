@@ -540,7 +540,8 @@ def run_pipeline(state: HealthState, cfg) -> None:
                 fps = frame_count / (now - last_report)
                 print(f"[health] fps={fps:.1f} | size={w}x{h} | camera=OK | tracks={len(tracker.tracks)} | cls={'ON' if classifier.enabled else 'OFF'}")
                 try:
-                    log_event("HEALTH", fps=round(fps, 2), size=[w, h], tracks=len(tracker.tracks), cls=bool(getattr(classifier, 'enabled', False)))
+                    if bool(getattr(cfg, "debug_log_health", True)):
+                        log_event("HEALTH", fps=round(fps, 2), size=[w, h], tracks=len(tracker.tracks), cls=bool(getattr(classifier, 'enabled', False)))
                 except Exception:
                     pass
                 state.update(camera_ok=True, fps=fps, width=w, height=h, frames_inc=frame_count)
@@ -609,7 +610,9 @@ def run_pipeline(state: HealthState, cfg) -> None:
             if dbg_mod > 0 and (frame_count % dbg_mod) == 0:
                 print(f"[dbg] person_dets={len(person_dets)} face_dets={len(face_dets)}")
                 try:
-                    log_event("DETECT", persons=len(person_dets), faces=len(face_dets))
+                    if bool(getattr(cfg, "debug_log_detect", True)):
+                        if len(person_dets) > 0 or len(face_dets) > 0 or bool(getattr(cfg, "debug_log_detect_zero", False)):
+                            log_event("DETECT", persons=len(person_dets), faces=len(face_dets))
                 except Exception:
                     pass
 
@@ -966,7 +969,8 @@ def run_pipeline(state: HealthState, cfg) -> None:
                     state.set_debug_jpeg(buf.tobytes())
                 last_stream_t = now
                 try:
-                    log_event('FRAME_OUT', jpeg=len(buf) if ok_jpg else 0)
+                    if bool(getattr(cfg, "debug_log_frame_out", False)):
+                        log_event('FRAME_OUT', jpeg=len(buf) if ok_jpg else 0)
                 except Exception:
                     pass
 

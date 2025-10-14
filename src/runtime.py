@@ -431,6 +431,18 @@ def run_pipeline(state: HealthState, cfg) -> None:
                 continue
         return polys
 
+    def _point_in_any(polys, x: float, y: float) -> bool:
+        """Ritorna True se il punto (x,y) è dentro uno qualsiasi dei poligoni (lista di np.array)."""
+        if not polys:
+            return False
+        try:
+            for poly in polys:
+                if cv2.pointPolygonTest(poly, (float(x), float(y)), False) >= 0:
+                    return True
+        except Exception:
+            return False
+        return False
+
     def _apply_person_filters(dets, w_px: int, h_px: int, cfg_obj):
         # dets: [((x,y,w,h), score), ...]
         min_area = int(getattr(cfg_obj, "person_min_box_area", 0) or 0)
@@ -549,7 +561,7 @@ def run_pipeline(state: HealthState, cfg) -> None:
                 person_dets = _apply_person_filters(person_dets, pw, ph, cfg)
             except Exception:
                 pass
-
+            
             # Detection volto
             face_dets = []
             if face_detector is not None:
@@ -787,16 +799,32 @@ def run_pipeline(state: HealthState, cfg) -> None:
                         # aggiorna prev_center dopo il check
                         tracker.update_prev_center(tid)
 
-            # --- OVERLAY E STREAM SOLO SE DEBUG ON E AD INTERVALLO ---
+                        # --- OVERLAY E STREAM SOLO SE DEBUG ON E AD INTERVALLO ---
             vis = proc.copy()
 
             if count_mode == "tripwire" and isinstance(roi_tripwire, (list, tuple)) and len(roi_tripwire) == 2:
                 draw_tripwire(vis, (tuple(roi_tripwire[0]), tuple(roi_tripwire[1])), roi_band_px, (255, 0, 0))
 
+            # opzionale: non mostrare in debug i track dentro le ignore-zone
+            debug_hide_ignored = bool(getattr(cfg, "debug_hide_ignored", True))
+            dbg_polys = _build_ignore_polys_px(cfg, pw, ph) if debug_hide_ignored else []
+            if dbg_polys:
+                try:
+                    cv2.polylines(vis, dbg_polys, isClosed=True, color=(80, 80, 80), thickness=1)
+                except Exception:
+                    pass
+
             for t in tracks:
                 tid = t["track_id"]
                 tstate = tracker.tracks.get(tid, {})
                 gid = tstate.get("global_id", tid)
+
+                # se richiesto, non disegnare track il cui centro cade in una ignore-zone
+                if dbg_polys:
+                    cx = float(t["bbox"][0]) + float(t["bbox"][2]) * 0.5
+                    cy = float(t["bbox"][1]) + float(t["bbox"][3]) * 0.5
+                    if _point_in_any(dbg_polys, cx, cy):
+                        continue
 
                 # box persona (cyan)
                 px, py, pwb, phb = map(int, t["bbox"])
@@ -813,6 +841,7 @@ def run_pipeline(state: HealthState, cfg) -> None:
                 c = t.get("conf", 0.0)
                 lbl = f"#G{gid} {g[:1].upper() if g!='unknown' else '?'} / {a if a!='unknown' else '--'} ({c:.2f})"
                 draw_box_with_label(vis, t["bbox"], lbl, (255, 255, 0))
+
 
             if getattr(cfg, 'debug_enabled', True) and (now - last_stream_t) >= stream_interval:
                 ok_jpg, buf = cv2.imencode('.jpg', vis, [int(cv2.IMWRITE_JPEG_QUALITY), 80])

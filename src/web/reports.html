@@ -39,6 +39,7 @@
       /* Chart areas sized by container to avoid growth loops */
       .chart-box{ position:relative; height:320px; }
       .chart-sm{ height:180px; }
+      .chart-square{ width:100%; aspect-ratio:1 / 1; }
       canvas{ display:block; width:100% !important; height:100% !important; }
 
       @media (max-width: 1100px){ .grid{ grid-template-columns:1fr } }
@@ -101,10 +102,10 @@
         </div>
         <div class="card">
           <div class="sub" style="margin-bottom:8px">Distribuzioni</div>
-          <div class="chart-box chart-sm">
+          <div class="chart-square">
             <canvas id="chartGender"></canvas>
           </div>
-          <div style="height:8px"></div>
+          <div style="height:10px"></div>
           <div class="chart-box chart-sm">
             <canvas id="chartAge"></canvas>
           </div>
@@ -131,16 +132,6 @@
             <thead>
               <tr>
                 <th>Giorno</th><th>Ora</th><th>Passaggi</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-          <div style="height:10px"></div>
-          <div class="sub">Ultimi 60 minuti (simulati)</div>
-          <table id="tblLastHour">
-            <thead>
-              <tr>
-                <th>Minuto</th><th>Passaggi</th>
               </tr>
             </thead>
             <tbody></tbody>
@@ -244,14 +235,6 @@
         return 0;
       }
 
-      function buildLastHour(){
-        const rows=[];
-        for(let i=59;i>=0;i--){
-          rows.push({min: i===0?"adesso":`-${i}′`, val: clamp(rnd(0,4)+ (i<10? rnd(0,3):0), 0, 12)});
-        }
-        return rows;
-      }
-
       function topHoursFrom(ts){
         const entries=[];
         if(ts.labels.length===24){
@@ -281,7 +264,10 @@
         const genderCfg = {
           type:'doughnut',
           data:{ labels:['F','M','U'], datasets:[{ data:[genderTotals.f, genderTotals.m, genderTotals.u] }]},
-          options:{ plugins:{legend:{position:'bottom'}} }
+          options:{
+            maintainAspectRatio:true,
+            plugins:{ legend:{ position:'right', labels:{ usePointStyle:true } } }
+          }
         };
         const ageCfg = {
           type:'bar',
@@ -304,10 +290,6 @@
       function fillTableTop(rows){
         const tb = document.querySelector('#tblTop tbody');
         tb.innerHTML = rows.map(r=>`<tr><td>${r.day}</td><td>${r.hour}</td><td>${r.val}</td></tr>`).join('');
-      }
-      function fillTableLastHour(rows){
-        const tb = document.querySelector('#tblLastHour tbody');
-        tb.innerHTML = rows.map(r=>`<tr><td>${r.min}</td><td>${r.val}</td></tr>`).join('');
       }
 
       // ====== KPIs ======
@@ -356,7 +338,6 @@
         const daily = summarizeDaily(range, ts);
         fillTableDaily(daily);
         fillTableTop(topHoursFrom(ts));
-        fillTableLastHour(buildLastHour());
         updateKpis(ts, gender, age);
         window.__lastData = {ts, daily, age, gender};
       }

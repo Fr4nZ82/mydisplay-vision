@@ -39,7 +39,8 @@
       /* Chart areas sized by container to avoid growth loops */
       .chart-box{ position:relative; height:320px; }
       .chart-sm{ height:180px; }
-      .chart-square{ width:100%; aspect-ratio:1 / 1; max-height:150px; }
+      .chart-square{ width:100%; aspect-ratio:1 / 1; max-height:150px; display:flex; align-items:center; justify-content:center; }
+      .chart-square canvas{ aspect-ratio:1 / 1 !important; height:auto !important; width:auto !important; max-width:150px; }
       canvas{ display:block; width:100% !important; height:100% !important; }
 
       @media (max-width: 1100px){ .grid{ grid-template-columns:1fr } }

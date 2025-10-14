@@ -37,7 +37,6 @@ Ambito: impostazioni di acquisizione e stream di debug (dimensioni, fps, overlay
 - target_fps (default: 10.0): FPS desiderati per il loop (throttle).
 - debug_enabled (default: false): abilita /debug e stream MJPEG.
 - debug_stream_fps (default: 5): FPS dello stream MJPEG.
-- debug_resize_width (default: 960): larghezza frame per /debug; 0=nessun resize.
 
 
 ## 🌐 API

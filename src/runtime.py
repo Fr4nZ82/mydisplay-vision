@@ -544,7 +544,7 @@ def run_pipeline(state: HealthState, cfg) -> None:
                 last_report = now
 
             # --- PREPARA FRAME DI LAVORO (sempre, non solo in debug) ---
-            proc_w = int(getattr(cfg, "proc_resize_width", getattr(cfg, "debug_resize_width", 0)) or 0)
+            proc_w = int(getattr(cfg, "proc_resize_width", 0) or 0)
             proc = resize_keep_aspect(frame, proc_w) if (proc_w > 0 and proc_w < frame.shape[1]) else frame
             ph, pw = proc.shape[:2]
 
@@ -799,7 +799,7 @@ def run_pipeline(state: HealthState, cfg) -> None:
                         # aggiorna prev_center dopo il check
                         tracker.update_prev_center(tid)
 
-                        # --- OVERLAY E STREAM SOLO SE DEBUG ON E AD INTERVALLO ---
+            # --- OVERLAY E STREAM SOLO SE DEBUG ON E AD INTERVALLO ---
             vis = proc.copy()
 
             if count_mode == "tripwire" and isinstance(roi_tripwire, (list, tuple)) and len(roi_tripwire) == 2:
@@ -807,10 +807,29 @@ def run_pipeline(state: HealthState, cfg) -> None:
 
             # opzionale: non mostrare in debug i track dentro le ignore-zone
             debug_hide_ignored = bool(getattr(cfg, "debug_hide_ignored", True))
-            dbg_polys = _build_ignore_polys_px(cfg, pw, ph) if debug_hide_ignored else []
+            debug_mark_centers = bool(getattr(cfg, "debug_mark_centers", True))
+            dbg_polys = _build_ignore_polys_px(cfg, pw, ph) if (getattr(cfg, "person_ignore_zone", None) and debug_hide_ignored) else _build_ignore_polys_px(cfg, pw, ph)
             if dbg_polys:
                 try:
-                    cv2.polylines(vis, dbg_polys, isClosed=True, color=(80, 80, 80), thickness=1)
+                    overlay = vis.copy()
+                    # riempimento semi-trasparente rosso
+                    cv2.fillPoly(overlay, dbg_polys, (0, 0, 255))
+                    vis = cv2.addWeighted(overlay, 0.12, vis, 0.88, 0)
+                    # contorno rosso più evidente
+                    cv2.polylines(vis, dbg_polys, isClosed=True, color=(0, 0, 255), thickness=2)
+                    # etichetta al baricentro del primo poligono
+                    M = cv2.moments(dbg_polys[0])
+                    if M["m00"] != 0:
+                        cx_lbl = int(M["m10"] / M["m00"])
+                        cy_lbl = int(M["m01"] / M["m00"])
+                    else:
+                        cx_lbl, cy_lbl = int(dbg_polys[0][0][0]), int(dbg_polys[0][0][1])
+                    label = "person_ignore1"
+                    (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+                    x1 = max(0, cx_lbl - tw // 2 - 4)
+                    y1 = max(0, cy_lbl - th // 2 - 4)
+                    cv2.rectangle(vis, (x1, y1), (x1 + tw + 8, y1 + th + 8), (0, 0, 0), -1)  # sfondo nero sempre
+                    cv2.putText(vis, label, (x1 + 4, y1 + th + 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
                 except Exception:
                     pass
 
@@ -819,12 +838,20 @@ def run_pipeline(state: HealthState, cfg) -> None:
                 tstate = tracker.tracks.get(tid, {})
                 gid = tstate.get("global_id", tid)
 
-                # se richiesto, non disegnare track il cui centro cade in una ignore-zone
+                # centro del box per debug/ignore
+                cx = float(t["bbox"][0]) + float(t["bbox"][2]) * 0.5
+                cy = float(t["bbox"][1]) + float(t["bbox"][3]) * 0.5
+                inside_ignore = False
                 if dbg_polys:
-                    cx = float(t["bbox"][0]) + float(t["bbox"][2]) * 0.5
-                    cy = float(t["bbox"][1]) + float(t["bbox"][3]) * 0.5
-                    if _point_in_any(dbg_polys, cx, cy):
-                        continue
+                    inside_ignore = _point_in_any(dbg_polys, cx, cy)
+
+                # marker del centro: rosso se inside_ignore, grigio altrimenti
+                if debug_mark_centers:
+                    cv2.circle(vis, (int(cx), int(cy)), 2, (0, 0, 255) if inside_ignore else (180, 180, 180), -1)
+
+                # se richiesto, non disegnare track il cui centro è dentro l'ignore
+                if debug_hide_ignored and inside_ignore:
+                    continue
 
                 # box persona (cyan)
                 px, py, pwb, phb = map(int, t["bbox"])
@@ -840,6 +867,7 @@ def run_pipeline(state: HealthState, cfg) -> None:
                 a = t.get("ageBucket", "unknown")
                 c = t.get("conf", 0.0)
                 lbl = f"#G{gid} {g[:1].upper() if g!='unknown' else '?'} / {a if a!='unknown' else '--'} ({c:.2f})"
+                # sfondo nero sempre (draw_box_with_label già usa uno sfondo nero pieno)
                 draw_box_with_label(vis, t["bbox"], lbl, (255, 255, 0))
 
 

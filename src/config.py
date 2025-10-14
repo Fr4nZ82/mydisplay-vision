@@ -29,7 +29,6 @@ _DEFAULTS: Dict[str, Any] = {
 
     "debug_enabled": False,
     "debug_stream_fps": 5,
-    # "debug_resize_width": 960,  # rimosso: non ridimensioniamo più per il debug
 
     "api_host": "127.0.0.1",
     "api_port": 8080,
@@ -81,6 +80,7 @@ _DEFAULTS: Dict[str, Any] = {
     "detector_target": 0,
     "detector_resize_width": 640,
     "debug_hide_ignored": True,  # se true, /debug non mostra i volti ignorati (score<th o fuori area persona)
+    "debug_mark_centers": False,  # se true, /debug marca il centro del volto con un + (utile per associare a persona)
 
     # --- Classifier: MODELLO COMBINATO (age+gender) ---
     # Default coerenti con Intel age-gender-recognition-retail-0013:

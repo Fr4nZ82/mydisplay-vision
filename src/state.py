@@ -155,7 +155,7 @@ class HealthState:
 
         # 2) fallback: estrai gli attributi più comuni
         keys = [
-            "camera", "width", "height", "target_fps", "debug_enabled", "debug_resize_width",
+            "camera", "width", "height", "target_fps", "debug_enabled",
             "debug_stream_fps", "api_host", "api_port",
             # detector
             "detector_model", "detector_score_th", "detector_nms_iou", "detector_top_k",

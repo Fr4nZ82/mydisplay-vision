@@ -38,7 +38,6 @@ Ambito: impostazioni di acquisizione e stream di debug (dimensioni, fps, overlay
 - debug_enabled (default: false): abilita /debug e stream MJPEG.
 - debug_stream_fps (default: 5): FPS dello stream MJPEG.
 
-
 ## 🌐 API
 
 Ambito: server HTTP locale per diagnostica, stream e metriche.
@@ -134,6 +133,11 @@ Ambito: detection primaria delle persone. Se presente, il tracker usa queste bbo
 Nota: il modello persone si carica automaticamente se presente in:
 - models/person/openvino/
 - models/person/onnx/
+
+Nota2: punti per l'ignore:
+[ [x1,y1],   [x2,y1],   [x2,y2],   [x1,y2] ]
+   ↑            ↑          ↑          ↑
+  alto-sx     alto-dx    basso-dx   basso-sx
 
 
 ### Face detector (YuNet)

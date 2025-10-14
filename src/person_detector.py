@@ -40,7 +40,18 @@ def _letterbox(img, new_size=640, color=(114, 114, 114)):
     out[top:top + nh, left:left + nw] = resized
     return out, r, left, top
 
-
+# ----------------- NMS helper -----------------
+# Applica la Non-Maximum Suppression (NMS) a riquadri in formato [x, y, w, h].
+# Parametri:
+# - boxes: lista di box nelle coordinate dell'immagine, formato XYWH.
+# - scores: lista di score/confidenze, uno per ciascun box.
+# - iou_th: soglia di Intersection-over-Union (0..1) per sopprimere box sovrapposti.
+# - max_det: numero massimo di box da mantenere dopo NMS.
+# Dettagli:
+# - Usa cv2.dnn.NMSBoxes per ottenere gli indici dei box da mantenere.
+# - Imposta score_threshold=0.0 perché il filtraggio per score è già stato fatto a monte.
+# - Normalizza l'output di OpenCV (tuple/list/array) in una lista piatta di indici.
+# - Restituisce una lista di indici (int) limitata a max_det; [] se boxes è vuoto.
 def _nms_xywh(boxes: List[List[float]], scores: List[float], iou_th: float, max_det: int):
     if not boxes:
         return []

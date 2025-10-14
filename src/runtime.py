@@ -807,16 +807,17 @@ def run_pipeline(state: HealthState, cfg) -> None:
 
             # opzionale: non mostrare in debug i track dentro le ignore-zone
             debug_hide_ignored = bool(getattr(cfg, "debug_hide_ignored", True))
-            debug_mark_centers = bool(getattr(cfg, "debug_mark_centers", True))
-            dbg_polys = _build_ignore_polys_px(cfg, pw, ph) if (getattr(cfg, "person_ignore_zone", None) and debug_hide_ignored) else _build_ignore_polys_px(cfg, pw, ph)
-            if dbg_polys:
+            debug_mark_centers = bool(getattr(cfg, "debug_mark_centers", False))
+            debug_show_ignore_rects = bool(getattr(cfg, "debug_show_ignore_rects", True))
+            dbg_polys = _build_ignore_polys_px(cfg, pw, ph)
+            if dbg_polys and debug_show_ignore_rects:
                 try:
                     overlay = vis.copy()
                     # riempimento semi-trasparente rosso
                     cv2.fillPoly(overlay, dbg_polys, (0, 0, 255))
                     vis = cv2.addWeighted(overlay, 0.12, vis, 0.88, 0)
-                    # contorno rosso più evidente
-                    cv2.polylines(vis, dbg_polys, isClosed=True, color=(0, 0, 255), thickness=2)
+                    # contorno rosso più sottile
+                    cv2.polylines(vis, dbg_polys, isClosed=True, color=(0, 0, 255), thickness=1)
                     # etichetta al baricentro del primo poligono
                     M = cv2.moments(dbg_polys[0])
                     if M["m00"] != 0:
@@ -832,6 +833,7 @@ def run_pipeline(state: HealthState, cfg) -> None:
                     cv2.putText(vis, label, (x1 + 4, y1 + th + 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
                 except Exception:
                     pass
+
 
             for t in tracks:
                 tid = t["track_id"]
@@ -852,10 +854,6 @@ def run_pipeline(state: HealthState, cfg) -> None:
                 # se richiesto, non disegnare track il cui centro è dentro l'ignore
                 if debug_hide_ignored and inside_ignore:
                     continue
-
-                # box persona (cyan)
-                px, py, pwb, phb = map(int, t["bbox"])
-                cv2.rectangle(vis, (px, py), (px + pwb, py + phb), (255, 255, 0), 1)
 
                 # face (lime) se presente
                 fb = tstate.get("face_bbox", None)

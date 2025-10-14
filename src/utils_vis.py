@@ -34,8 +34,9 @@ def draw_box_with_label(
     bbox: Tuple[float, float, float, float],
     label: str,
     color: Tuple[int, int, int] = (0, 180, 0),
-    thickness: int = 2,
+    thickness: int = 1,
 ) -> None:
+
     """Disegna un riquadro (x,y,w,h) e un box testuale sopra."""
     x, y, w, h = map(int, bbox)
     cv2.rectangle(img, (x, y), (x + w, y + h), color, thickness)

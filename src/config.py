@@ -81,6 +81,7 @@ _DEFAULTS: Dict[str, Any] = {
     "detector_resize_width": 640,
     "debug_hide_ignored": True,  # se true, /debug non mostra i volti ignorati (score<th o fuori area persona)
     "debug_mark_centers": False,  # se true, /debug marca il centro del volto con un + (utile per associare a persona)
+    "debug_show_ignore_rects": True,  # se false, non disegna poligoni/rect di ignore nella pagina di debug
 
     # --- Classifier: MODELLO COMBINATO (age+gender) ---
     # Default coerenti con Intel age-gender-recognition-retail-0013:

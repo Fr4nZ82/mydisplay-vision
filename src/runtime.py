@@ -18,7 +18,7 @@ import cv2
 import numpy as np
 from .utils_vis import (
     resize_keep_aspect, draw_box_with_label,
-    draw_tripwire, associate_faces_to_tracks
+    draw_tripwire, associate_faces_to_tracks, associate_faces_to_tracks_with_kps
 )
 from .state import HealthState
 from .tracker import SortLiteTracker
@@ -566,8 +566,9 @@ def run_pipeline(state: HealthState, cfg) -> None:
             except Exception:
                 pass
             
-            # Detection volto
+            # Detection volto (con landmarks)
             face_dets = []
+            face_dets_kps = []
             if face_detector is not None:
                 try:
                     det_w = int(getattr(cfg, "detector_resize_width", 0) or 0)
@@ -577,13 +578,28 @@ def run_pipeline(state: HealthState, cfg) -> None:
                     else:
                         det_img = proc
                         s = 1.0
-                    dets_ori = face_detector.detect(det_img)
-                    if s != 1.0:
-                        face_dets = [((float(x)/s, float(y)/s, float(w)/s, float(h)/s), float(score)) for (x, y, w, h), score in dets_ori]
-                    else:
-                        face_dets = [((float(x), float(y), float(w), float(h)), float(score)) for (x, y, w, h), score in dets_ori]
+                    # Prova a usare la versione con landmark; fallback a quella senza
+                    try:
+                        dets_kps_ori = face_detector.detect_with_kps(det_img)
+                        face_dets_kps = []
+                        for ((x, y, w, h), score), kps in dets_kps_ori:
+                            if s != 1.0:
+                                bbox = (float(x)/s, float(y)/s, float(w)/s, float(h)/s)
+                                kps_s = (kps / float(s)).astype(np.float32)
+                            else:
+                                bbox = (float(x), float(y), float(w), float(h))
+                                kps_s = kps.astype(np.float32)
+                            face_dets_kps.append(((bbox, float(score)), kps_s))
+                        face_dets = [(det[0], det[1]) for det, _ in face_dets_kps]
+                    except Exception:
+                        dets_ori = face_detector.detect(det_img)
+                        if s != 1.0:
+                            face_dets = [((float(x)/s, float(y)/s, float(w)/s, float(h)/s), float(score)) for (x, y, w, h), score in dets_ori]
+                        else:
+                            face_dets = [((float(x), float(y), float(w), float(h)), float(score)) for (x, y, w, h), score in dets_ori]
                 except Exception:
                     face_dets = []
+                    face_dets_kps = []
 
             # Log periodico conteggio detection (opzionale)
             try:
@@ -619,6 +635,15 @@ def run_pipeline(state: HealthState, cfg) -> None:
                 iou_th=float(getattr(cfg, "face_assoc_iou_th", 0.20)),
                 use_center_in=bool(getattr(cfg, "face_assoc_center_in", True))
             )
+            # Associazione parallela con kps (se disponibili)
+            if face_dets_kps:
+                face_assoc_kps = associate_faces_to_tracks_with_kps(
+                    face_dets_kps, tracks,
+                    iou_th=float(getattr(cfg, "face_assoc_iou_th", 0.20)),
+                    use_center_in=bool(getattr(cfg, "face_assoc_center_in", True))
+                )
+            else:
+                face_assoc_kps = {}
 
             # Assegna/ReID
             for t in tracks:
@@ -627,6 +652,7 @@ def run_pipeline(state: HealthState, cfg) -> None:
                 x, y, w, h = map(int, t["bbox"])
                 person_crop = proc[max(0, y): y + h, max(0, x): x + w]
                 matched_face = face_assoc.get(tid)
+                matched_face_kps = face_assoc_kps.get(tid) if 'face_assoc_kps' in locals() else None
 
                 if "global_id" not in tstate:
                     # Prepara crop, ma NON creare GID solo con face qui: aspettiamo il classifier
@@ -663,7 +689,15 @@ def run_pipeline(state: HealthState, cfg) -> None:
                         except Exception:
                             pass
 
-                # salva anche il face bbox corrente (per classificazione)
+                # salva anche il face bbox corrente (per classificazione) e i landmark se presenti
+                if matched_face_kps is not None:
+                    try:
+                        _, kps5 = matched_face_kps
+                        tstate["face_kps5"] = kps5.astype(float).tolist()
+                    except Exception:
+                        tstate["face_kps5"] = None
+                else:
+                    tstate["face_kps5"] = None
                 tstate["face_bbox"] = matched_face  # None o (x,y,w,h)
                 tracker.tracks[tid] = tstate
 
@@ -751,9 +785,17 @@ def run_pipeline(state: HealthState, cfg) -> None:
                                             log_event("REID_INPUT", tid=int(tid), hasFace=True, faceSize=[int(fw), int(fh)], hasBody=bool(body_crop2 is not None), bodyH=(int(body_crop2.shape[0]) if body_crop2 is not None else None), src=track_src)
                                     except Exception:
                                         pass
+                                    kps_arg = None
+                                    try:
+                                        kps5 = tstate.get("face_kps5", None)
+                                        if kps5 is not None:
+                                            kps_arr = np.array(kps5, dtype=np.float32)
+                                            kps_arg = (kps_arr - np.array([fx, fy], dtype=np.float32)).astype(np.float32)
+                                    except Exception:
+                                        kps_arg = None
                                     new_gid = reid.assign_global_id(
                                         face_bgr_crop=face_roi,
-                                        kps5=None,
+                                        kps5=kps_arg,
                                         body_bgr_crop=body_crop2,
                                     )
                                 except TypeError:

@@ -117,3 +117,35 @@ def associate_faces_to_tracks(
         if best_idx >= 0:
             used.add(best_idx)
     return assoc
+
+
+def associate_faces_to_tracks_with_kps(
+    face_dets_kps: List[Tuple[Tuple[Tuple[float, float, float, float], float], np.ndarray]],
+    person_tracks: List[Dict],
+    iou_th: float = 0.2,
+    use_center_in: bool = True
+) -> Dict[int, Optional[Tuple[Tuple[float, float, float, float], np.ndarray]]]:
+    """
+    Variante che preserva anche i 5 landmark: restituisce { track_id: (face_bbox, kps5) or None }
+    """
+    assoc: Dict[int, Optional[Tuple[Tuple[float, float, float, float], np.ndarray]]] = {}
+    used = set()
+    for t in person_tracks:
+        tb = tuple(map(float, t["bbox"]))
+        best_iou, best_idx = 0.0, -1
+        for i, (det, kps) in enumerate(face_dets_kps):
+            fb, fs = det
+            if i in used:
+                continue
+            ok = (iou_xywh(tb, fb) >= iou_th) or (use_center_in and center_in(fb, tb))
+            if ok:
+                cand = iou_xywh(tb, fb)
+                if cand > best_iou:
+                    best_iou, best_idx = cand, i
+        if best_idx >= 0:
+            assoc[int(t["track_id"])] = (face_dets_kps[best_idx][0][0], face_dets_kps[best_idx][1])
+            used.add(best_idx)
+        else:
+            assoc[int(t["track_id"])] = None
+    return assoc
+

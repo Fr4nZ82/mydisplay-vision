@@ -10,7 +10,8 @@ Det = Tuple[BBox, float]  # ((x, y, w, h), score)
 class YuNetDetector:
     """
     Wrapper per OpenCV FaceDetectorYN (YuNet).
-    Ritorna una lista di ((x,y,w,h), score) in coordinate dell'immagine di input.
+    - detect(): ritorna lista di ((x,y,w,h), score)
+    - detect_with_kps(): ritorna lista di ((x,y,w,h), score, kps5[5x2])
     """
     def __init__(self, model_path: str, score_th: float = 0.7, nms_iou: float = 0.3,
                  top_k: int = 500, backend_id: int = 0, target_id: int = 0) -> None:
@@ -50,3 +51,31 @@ class YuNetDetector:
             score = float(d[-1])
             out.append(((int(x), int(y), int(bw), int(bh)), score))
         return out
+
+    def detect_with_kps(self, frame_bgr: np.ndarray) -> List[Tuple[Det, np.ndarray]]:
+        """
+        :param frame_bgr: immagine BGR (uint8)
+        :return: lista [ ( ((x,y,w,h), score), kps5[5x2] ), ... ]
+        """
+        if frame_bgr is None or frame_bgr.size == 0:
+            return []
+        h, w = frame_bgr.shape[:2]
+        self._ensure_size(w, h)
+        _, dets = self.detector.detect(frame_bgr)
+        if dets is None:
+            return []
+        out: List[Tuple[Det, np.ndarray]] = []
+        for d in dets:
+            x, y, bw, bh = d[0:4]
+            score = float(d[-1])
+            # d[4:14] contiene 5 coppie (lx, ly)
+            kps = np.array([
+                [d[4], d[5]],
+                [d[6], d[7]],
+                [d[8], d[9]],
+                [d[10], d[11]],
+                [d[12], d[13]],
+            ], dtype=np.float32)
+            out.append((((int(x), int(y), int(bw), int(bh)), score), kps))
+        return out
+

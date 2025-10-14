@@ -444,7 +444,8 @@ class FaceReID:
                 pass
         if self.enabled and self.backend is not None and face_bgr_crop is not None:
             face_for_feat = None
-            if self.backend_name == "sface" and kps5 is not None:
+            # Applica warp con 5 landmark sia per SFace sia per backend ArcFace (OV/ONNX) se disponibili
+            if kps5 is not None:
                 try:
                     face_for_feat = _warp_face_bgr(face_bgr_crop, np.asarray(kps5, dtype=np.float32), (112,112))
                 except Exception:

@@ -285,7 +285,7 @@ class FaceReID:
             pid = self.alias[pid]
         return pid
     
-    def set_id_policy(self, require_face_if_available=None, body_only_th=None, allow_body_seed=None, min_face_px=None, face_body_bias=None):
+    def set_id_policy(self, require_face_if_available=None, body_only_th=None, allow_body_seed=None, min_face_px=None, face_body_bias=None, min_body_h_px=None):
         if require_face_if_available is not None:
             self.require_face_if_available = bool(require_face_if_available)
         if body_only_th is not None:
@@ -302,6 +302,12 @@ class FaceReID:
                 self.face_body_bias = float(face_body_bias)
             except Exception:
                 self.face_body_bias = 0.0
+        if min_body_h_px is not None:
+            try:
+                self.min_body_h_px = int(min_body_h_px)
+            except Exception:
+                self.min_body_h_px = 0
+
 
 
     # --- NEW: setter backend/body + debug ---
@@ -441,6 +447,15 @@ class FaceReID:
 
         # 2) embedding corpo (se backend presente + crop valido)
         body_vec = None
+        # Applica filtro altezza minima del crop corpo per evitare inquinamento della banca
+        min_body_h_px = int(getattr(self, 'min_body_h_px', 0) or 0)
+        if min_body_h_px > 0 and body_bgr_crop is not None:
+            try:
+                bh = int(body_bgr_crop.shape[0])
+                if bh < min_body_h_px:
+                    body_bgr_crop = None
+            except Exception:
+                pass
         if self.body_backend is not None and body_bgr_crop is not None:
             try:
                 body_vec = self.body_backend.embed(body_bgr_crop)

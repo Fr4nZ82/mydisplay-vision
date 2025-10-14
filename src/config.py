@@ -118,6 +118,7 @@ _DEFAULTS: Dict[str, Any] = {
     "reid_require_face_if_available": False,
     "reid_min_face_px": 56,
     "reid_face_body_bias": 0.02,
+    "reid_min_body_h_px": 100,
 
     # --- Body ReID ---
     "body_reid_input_w": 128,

@@ -83,6 +83,8 @@ _DEFAULTS: Dict[str, Any] = {
     "debug_mark_centers": False,  # se true, /debug marca il centro del volto con un + (utile per associare a persona)
     "debug_show_ignore_rects": True,  # se false, non disegna poligoni/rect di ignore nella pagina di debug
     "debug_reid_verbose": False,
+    # Nascondi in overlay i track non ancora "committati" (niente GID e niente gender valido)
+    "debug_hide_uncommitted": True,
 
     # --- Classifier: MODELLO COMBINATO (age+gender) ---
     # Default coerenti con Intel age-gender-recognition-retail-0013:

@@ -877,6 +877,7 @@ def run_pipeline(state: HealthState, cfg) -> None:
 
             # --- OVERLAY E STREAM SOLO SE DEBUG ON E AD INTERVALLO ---
             vis = proc.copy()
+            debug_hide_uncommitted = bool(getattr(cfg, "debug_hide_uncommitted", True))
 
             if count_mode == "tripwire" and isinstance(roi_tripwire, (list, tuple)) and len(roi_tripwire) == 2:
                 draw_tripwire(vis, (tuple(roi_tripwire[0]), tuple(roi_tripwire[1])), roi_band_px, (255, 0, 0))
@@ -936,6 +937,20 @@ def run_pipeline(state: HealthState, cfg) -> None:
                 if fb is not None:
                     fx, fy, fw, fh = map(int, fb)
                     cv2.rectangle(vis, (fx, fy), (fx + fw, fy + fh), (0, 255, 0), 1)
+
+                # opzionale: non disegnare tracce non committate (senza gid o senza gender valido)
+                if debug_hide_uncommitted:
+                    assigned_with_face = tracker.tracks.get(tid, {}).get("assigned_with_face", False)
+                    gender_valid = (t.get("gender", "unknown") in ("male", "female")) and (float(t.get("conf", 0.0)) >= float(getattr(cfg, "cls_min_conf", 0.35)))
+                    if not assigned_with_face and not gender_valid:
+                        continue
+
+                                # opzionale: non disegnare tracce non committate (senza gid o senza gender valido)
+                if debug_hide_uncommitted:
+                    assigned_with_face = tracker.tracks.get(tid, {}).get("assigned_with_face", False)
+                    gender_valid = (t.get("gender", "unknown") in ("male", "female")) and (float(t.get("conf", 0.0)) >= float(getattr(cfg, "cls_min_conf", 0.35)))
+                    if not assigned_with_face and not gender_valid:
+                        continue
 
                 g = t.get("gender", "unknown")
                 a = t.get("ageBucket", "unknown")

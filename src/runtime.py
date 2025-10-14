@@ -313,7 +313,10 @@ def run_pipeline(state: HealthState, cfg) -> None:
             require_face_if_available=bool(getattr(cfg, "reid_require_face_if_available", True)),
             body_only_th=float(getattr(cfg, "body_only_th", 0.80)),
             allow_body_seed=bool(getattr(cfg, "reid_allow_body_seed", True)),
+            min_face_px=int(getattr(cfg, "reid_min_face_px", 0)),
+            face_body_bias=float(getattr(cfg, "reid_face_body_bias", 0.0))
         )
+
         if hasattr(reid, "set_debug"):
             reid.set_debug(bool(getattr(cfg, "debug_reid_verbose", False)))
     except Exception:

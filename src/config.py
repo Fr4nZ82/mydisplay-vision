@@ -82,6 +82,7 @@ _DEFAULTS: Dict[str, Any] = {
     "debug_hide_ignored": True,  # se true, /debug non mostra i volti ignorati (score<th o fuori area persona)
     "debug_mark_centers": False,  # se true, /debug marca il centro del volto con un + (utile per associare a persona)
     "debug_show_ignore_rects": True,  # se false, non disegna poligoni/rect di ignore nella pagina di debug
+    "debug_reid_verbose": False,
 
     # --- Classifier: MODELLO COMBINATO (age+gender) ---
     # Default coerenti con Intel age-gender-recognition-retail-0013:
@@ -115,7 +116,8 @@ _DEFAULTS: Dict[str, Any] = {
     "reid_memory_ttl_sec": 600,
     "reid_bank_size": 10,
     "reid_require_face_if_available": False,
-    "debug_reid_verbose": False,
+    "reid_min_face_px": 56,
+    "reid_face_body_bias": 0.02,
 
     # --- Body ReID ---
     "body_reid_input_w": 128,

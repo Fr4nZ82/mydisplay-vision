@@ -285,13 +285,24 @@ class FaceReID:
             pid = self.alias[pid]
         return pid
     
-    def set_id_policy(self, require_face_if_available=None, body_only_th=None, allow_body_seed=None):
+    def set_id_policy(self, require_face_if_available=None, body_only_th=None, allow_body_seed=None, min_face_px=None, face_body_bias=None):
         if require_face_if_available is not None:
             self.require_face_if_available = bool(require_face_if_available)
         if body_only_th is not None:
             self.body_only_th = float(body_only_th)
         if allow_body_seed is not None:
             self.allow_body_seed = bool(allow_body_seed)
+        if min_face_px is not None:
+            try:
+                self.min_face_px = int(min_face_px)
+            except Exception:
+                self.min_face_px = 0
+        if face_body_bias is not None:
+            try:
+                self.face_body_bias = float(face_body_bias)
+            except Exception:
+                self.face_body_bias = 0.0
+
 
     # --- NEW: setter backend/body + debug ---
     def set_body_backend(self, backend) -> None:
@@ -408,6 +419,15 @@ class FaceReID:
 
         # 1) embedding volto (se disponibile)
         feat = None
+        # Applica filtro dimensione minima volto per evitare inquinamento della banca
+        min_face_px = int(getattr(self, 'min_face_px', 0) or 0)
+        if min_face_px > 0 and face_bgr_crop is not None:
+            try:
+                fh, fw = face_bgr_crop.shape[:2]
+                if min(fw, fh) < min_face_px:
+                    face_bgr_crop = None
+            except Exception:
+                pass
         if self.enabled and self.backend is not None and face_bgr_crop is not None:
             face_for_feat = None
             if self.backend_name == "sface" and kps5 is not None:
@@ -464,10 +484,21 @@ class FaceReID:
         best_face = max(cand, key=lambda r: r[1]) if (feat is not None and cand) else None
         best_body_all = max(cand, key=lambda r: r[2]) if (body_vec is not None and cand) else None
 
+        # Se entrambi (face,body) puntano allo stesso ID e sono sopra soglia, scegli quello con sim maggiore (bias alla faccia)
+        bias = float(getattr(self, 'face_body_bias', 0.0) or 0.0)
+        if chosen is None and best_face and best_body_all and best_face[0] == best_body_all[0] and best_face[1] >= self.sim_th and best_body_all[2] >= self.body_only_th:
+            if (best_face[1] + bias) >= best_body_all[2]:
+                chosen = int(best_face[0])
+                reason = f"face>=body (bias={bias:.3f})"
+            else:
+                chosen = int(best_body_all[0])
+                reason = f"body>face (bias={bias:.3f})"
+
         # A) Se c'è volto e supera soglia → match per volto
-        if best_face and best_face[1] >= self.sim_th:
+        if chosen is None and best_face and best_face[1] >= self.sim_th:
             chosen = int(best_face[0])
             reason = f"face>=th({best_face[1]:.3f})"
+
 
         # B) Altrimenti, prova corpo con gate sugli ID ancorati (face) se configurato
         if chosen is None and body_vec is not None:

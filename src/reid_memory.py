@@ -30,7 +30,12 @@ try:
 except Exception:
     _OVCore = None
 
-
+# logging strutturato
+try:
+    from .logs import log_event as _log_event
+except Exception:
+    def _log_event(*args, **kwargs):
+        return None
 
 def _cosine_sim(a: np.ndarray, b: np.ndarray) -> float:
     if a is None or b is None:
@@ -389,7 +394,10 @@ class FaceReID:
         if loser in self.mem:
             del self.mem[loser]
         if self.debug:
-            print(f"[ReID] MERGE loser=G{loser} -> winner=G{winner}")
+            try:
+                _log_event("REID_MERGE", winner=int(winner), loser=int(loser))
+            except Exception:
+                pass
         return self.canon(winner)
 
     def _sim_to_pid_body(self, pid: int, vec: np.ndarray) -> float:
@@ -471,7 +479,10 @@ class FaceReID:
             self.mem[gid] = {'feats': [], 'body': [], 'last': now, 'created': now, 'hits': 1,
                              'meta': {'gender_hist': {}, 'age_hist': {}}}
             if self.debug:
-                print(f"[ReID] new id(no signals) -> G{gid}")
+                try:
+                    _log_event("REID_NEW", gid=int(gid), reason="no_signals")
+                except Exception:
+                    pass
             return gid
 
         # Costruisci candidati con similarità disponibili
@@ -546,7 +557,15 @@ class FaceReID:
                 self._add_body(new_id, body_vec, now)
             if self.debug:
                 top3 = cand[:3]
-                print(f"[ReID] NEW -> G{new_id} | reason={reason} top3={[(p, round(f,3), round(b,3)) for (p,f,b,_) in top3]}")
+                try:
+                    _log_event(
+                        "REID_NEW",
+                        gid=int(new_id),
+                        reason=str(reason),
+                        top3=[{"pid": int(p), "face": float(round(f, 4)), "body": float(round(b, 4))} for (p, f, b, _) in top3],
+                    )
+                except Exception:
+                    pass
             return new_id
 
         # Match su ID esistente
@@ -571,7 +590,15 @@ class FaceReID:
                 self._add_body(pid, body_vec, now)
         if self.debug:
             top3 = cand[:3]
-            print(f"[ReID] MATCH -> G{pid} | reason={reason} top3={[(p, round(f,3), round(b,3)) for (p,f,b,_) in top3]}")
+            try:
+                _log_event(
+                    "REID_MATCH",
+                    gid=int(pid),
+                    reason=str(reason),
+                    top3=[{"pid": int(p), "face": float(round(f, 4)), "body": float(round(b, 4))} for (p, f, b, _) in top3],
+                )
+            except Exception:
+                pass
         return pid
 
     def touch(self, global_id: int, now_ts: Optional[float] = None):

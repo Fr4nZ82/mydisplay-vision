@@ -601,13 +601,15 @@ def run_pipeline(state: HealthState, cfg) -> None:
             track_src = "person" if person_dets else "face"
             detections = [[bx, by, bw, bh, sc] for (bx, by, bw, bh), sc in (person_dets if person_dets else face_dets)]
             try:
-                log_event("TRACK_INPUT", src=track_src, det=len(detections))
+                if len(detections) > 0:
+                    log_event("TRACK_INPUT", src=track_src, det=len(detections))
             except Exception:
                 pass
 
             tracks = tracker.update(detections)
             try:
-                log_event("TRACK", active=len(tracks))
+                if len(tracks) > 0:
+                    log_event("TRACK", active=len(tracks))
             except Exception:
                 pass
 
@@ -627,32 +629,39 @@ def run_pipeline(state: HealthState, cfg) -> None:
                 matched_face = face_assoc.get(tid)
 
                 if "global_id" not in tstate:
+                    # Prepara crop, ma NON creare GID solo con face qui: aspettiamo il classifier
                     if matched_face is not None:
                         fx, fy, fw, fh = map(int, matched_face)
                         face_crop = proc[max(0, fy): fy + fh, max(0, fx): fx + fw]
                     else:
                         face_crop = None
-                        
+
                     body_crop_to_pass = person_crop if track_src == "person" else None
-                    try:
-                        gid = reid.assign_global_id(
-                            face_bgr_crop=face_crop,
-                            kps5=None,
-                            body_bgr_crop=body_crop_to_pass
-                        )
-                    except TypeError:
-                        # fallback: chiamate legacy
+
+                    # Crea subito un GID solo se abbiamo un embedding corpo disponibile.
+                    # Se non c'è corpo (o backend corpo), aspetta la classificazione per committare il volto.
+                    if body_crop_to_pass is not None and getattr(reid, "body_backend", None) is not None:
                         try:
-                            gid = reid.assign_global_id(face_bgr_crop=face_crop, kps5=None)
+                            if bool(getattr(cfg, "debug_reid_verbose", False)):
+                                body_h = int(person_crop.shape[0]) if (body_crop_to_pass is not None) else None
+                                log_event("REID_INPUT", tid=int(tid), hasFace=False, faceSize=None, hasBody=True, bodyH=body_h, src=track_src)
+                        except Exception:
+                            pass
+                        try:
+                            gid = reid.assign_global_id(
+                                face_bgr_crop=None,
+                                kps5=None,
+                                body_bgr_crop=body_crop_to_pass
+                            )
                         except TypeError:
-                            gid = reid.assign_global_id(face_crop, None)
-                    gid = reid.canon(gid)
-                    tstate["global_id"] = gid
-                    tstate["assigned_with_face"] = (matched_face is not None)
-                    try:
-                        log_event("REID_ASSIGN", tid=int(tid), gid=int(gid), withFace=bool(matched_face is not None))
-                    except Exception:
-                        pass
+                            gid = reid.assign_global_id(None, None)
+                        gid = reid.canon(gid)
+                        tstate["global_id"] = gid
+                        tstate["assigned_with_face"] = False
+                        try:
+                            log_event("REID_ASSIGN", tid=int(tid), gid=int(gid), withFace=False)
+                        except Exception:
+                            pass
 
                 # salva anche il face bbox corrente (per classificazione)
                 tstate["face_bbox"] = matched_face  # None o (x,y,w,h)
@@ -726,14 +735,22 @@ def run_pipeline(state: HealthState, cfg) -> None:
                     if (now - last_ts_t) * 1000.0 >= cls_interval_ms:
                         face_roi = proc[max(0, fy): fy + fh, max(0, fx): fx + fw]
                         res = classifier.infer(face_roi)
-                        # Se l'ID era stato assegnato senza volto, prova a correggere con volto+corpo
+                        # Commit/ReID del volto SOLO se il classifier ha dato un gender valido (no unknown)
                         try:
-                            if not tstate.get("assigned_with_face", False):
+                            gender_ok = isinstance(res.get("gender"), str) and res.get("gender") in ("male", "female")
+                            conf_ok = float(res.get("confidence", 0.0)) >= float(getattr(cfg, "cls_min_conf", 0.35))
+                            if gender_ok and conf_ok and (not tstate.get("assigned_with_face", False) or ("global_id" not in tstate)):
                                 try:
                                     body_crop2 = (
                                         proc[max(0, t["bbox"][1]): t["bbox"][1] + t["bbox"][3],
                                              max(0, t["bbox"][0]): t["bbox"][0] + t["bbox"][2]]
                                     ) if track_src == "person" else None
+                                    # Log input di commit volto
+                                    try:
+                                        if bool(getattr(cfg, "debug_reid_verbose", False)):
+                                            log_event("REID_INPUT", tid=int(tid), hasFace=True, faceSize=[int(fw), int(fh)], hasBody=bool(body_crop2 is not None), bodyH=(int(body_crop2.shape[0]) if body_crop2 is not None else None), src=track_src)
+                                    except Exception:
+                                        pass
                                     new_gid = reid.assign_global_id(
                                         face_bgr_crop=face_roi,
                                         kps5=None,
@@ -742,7 +759,15 @@ def run_pipeline(state: HealthState, cfg) -> None:
                                 except TypeError:
                                     new_gid = reid.assign_global_id(face_bgr_crop=face_roi, kps5=None)
                                 new_gid = reid.canon(new_gid)
-                                if new_gid != tstate.get("global_id", tid):
+                                old_gid = tstate.get("global_id", None)
+                                if old_gid is None:
+                                    # primo assign via volto
+                                    tstate["global_id"] = new_gid
+                                    try:
+                                        log_event("REID_ASSIGN", tid=int(tid), gid=int(new_gid), withFace=True)
+                                    except Exception:
+                                        pass
+                                elif new_gid != old_gid:
                                     tstate["global_id"] = new_gid
                                     try:
                                         log_event("REID_CORRECT", tid=int(tid), new_gid=int(new_gid))

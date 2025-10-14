@@ -80,6 +80,7 @@ _DEFAULTS: Dict[str, Any] = {
     "detector_backend": 0,
     "detector_target": 0,
     "detector_resize_width": 640,
+    "debug_hide_ignored": True,  # se true, /debug non mostra i volti ignorati (score<th o fuori area persona)
 
     # --- Classifier: MODELLO COMBINATO (age+gender) ---
     # Default coerenti con Intel age-gender-recognition-retail-0013:

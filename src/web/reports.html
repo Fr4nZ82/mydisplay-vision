@@ -1,331 +1,375 @@
 <!doctype html>
 <html lang="it">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>MyDisplay Vision – Report</title>
-<style>
-:root{
-color-scheme:dark;
---bg:#0f1115;--card:#131722;--muted:#94a3b8;--text:#e5e7eb;--border:#202634;--accent:#7dd3fc;
-}
-*{box-sizing:border-box}
-html,body{height:100%}
-body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",sans-serif}
-.wrap{max-width:1400px;margin:0 auto;padding:18px}
-header{display:flex;gap:16px;align-items:center;justify-content:space-between;margin-bottom:16px}
-.title{font-size:18px;font-weight:700;letter-spacing:.2px}
-.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px}
-.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:14px}
-.kpi{display:flex;flex-direction:column;gap:6px}
-.kpi .lbl{color:var(--muted);font-size:12px}
-.kpi .val{font-size:20px;font-weight:700}
-.grid{display:grid;grid-template-columns:1.5fr 1fr;gap:12px}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
-.sub{color:var(--muted);font-size:12px}
-.toolbar{display:flex;gap:8px;flex-wrap:wrap}
-button,select{background:#0b0e16;border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:10px;cursor:pointer}
-button:hover{border-color:#2c3549}
-table{width:100%;border-collapse:collapse}
-th,td{padding:8px 10px;border-bottom:1px solid var(--border);text-align:left}
-th{color:var(--muted);font-weight:600;font-size:12px}
-tbody tr:hover{background:#0e1420}
-.foot{margin-top:18px;color:var(--muted);font-size:12px}
-canvas{width:100%;height:320px;}
-@media (max-width: 1100px){.grid{grid-template-columns:1fr}}
-@media (max-width: 900px){.kpis{grid-template-columns:repeat(2,1fr)}}
-</style>
-<!-- Chart.js via CDN -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
-</head>
-<body>
-<div class="wrap">
-<header>
-<div>
-<div class="title">MyDisplay Vision – Report metriche (demo dati random)</div>
-<div class="sub">Conteggio persone · sesso · età · finestra temporale simulata</div>
-</div>
-<div class="controls">
-<div class="toolbar">
-<label for="range">Intervallo</label>
-<select id="range">
-<option value="today">Oggi</option>
-<option value="yesterday">Ieri</option>
-<option value="7d" selected>Ultimi 7 giorni</option>
-<option value="30d">Ultimi 30 giorni</option>
-</select>
-<button id="regen">Rigenera dati</button>
-<button id="csv">Esporta CSV</button>
-</div>
-</div>
-</header>
-<section class="card kpis" id="kpiBox">
-<div class="kpi"><div class="lbl">Visitatori (stimati)</div><div class="val" id="kpiVisitors">–</div><div class="sub" id="kpiVisitorsSub">Somma persone uniche stimate</div></div>
-<div class="kpi"><div class="lbl">Pico orario</div><div class="val" id="kpiPeak">–</div><div class="sub" id="kpiPeakSub">Ora con passaggi massimi</div></div>
-<div class="kpi"><div class="lbl">Genere</div><div class="val" id="kpiGender">–</div><div class="sub" id="kpiGenderSub">F / M / U</div></div>
-<div class="kpi"><div class="lbl">Età mediana</div><div class="val" id="kpiAge">–</div><div class="sub" id="kpiAgeSub">Distribuzione a fasce</div></div>
-</section>
-<section class="grid">
-<div class="card">
-<div class="sub" style="margin-bottom:8px">Serie temporale visitatori</div>
-<canvas id="chartTime"></canvas>
-</div>
-<div class="card">
-<div class="sub" style="margin-bottom:8px">Distribuzioni</div>
-<canvas id="chartGender" style="height:180px"></canvas>
-<div style="height:8px"></div>
-<canvas id="chartAge" style="height:180px"></canvas>
-</div>
-</section>
-<section class="grid2">
-<div class="card">
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-<div class="sub">Riepilogo per giorno/ora</div>
-</div>
-<table id="tblDaily">
-<thead><tr><th>Data</th><th>Totale</th><th>F</th><th>M</th><th>U</th><th>Età mediana</th></tr></thead>
-<tbody></tbody>
-</table>
-</div>
-<div class="card">
-<div class="sub" style="margin-bottom:6px">Top ore per traffico</div>
-<table id="tblTop">
-<thead><tr><th>Giorno</th><th>Ora</th><th>Passaggi</th></tr></thead>
-<tbody></tbody>
-</table>
-<div style="height:10px"></div>
-<div class="sub">Ultimi 60 minuti (simulati)</div>
-<table id="tblLastHour">
-<thead><tr><th>Minuto</th><th>Passaggi</th></tr></thead>
-<tbody></tbody>
-</table>
-</div>
-</section>
-<div class="foot">⚠️ Demo: tutti i numeri sono generati al volo in modo pseudo‑casuale. Integra i dati reali chiamando la tua API (es. <code>/stats</code>, <code>/metrics</code>) e sostituendo <code>generateFakeData()</code>.</div>
-</div>
-<script>
-// ====== Utility ======
-const rnd = (min,max)=>Math.floor(Math.random()*(max-min+1))+min;
-const clamp = (v,min,max)=>Math.max(min,Math.min(max,v));
-const pick = a=>a[Math.floor(Math.random()*a.length)];
-function formatDate(d){return d.toISOString().slice(0,10)}
-function pad2(n){return (n<10?'0':'')+n}
-// ====== Fake data generator ======
-function generateTimeline(range){
-const now = new Date();
-let start, stepMs, points;
-if(range==='today'){
-start = new Date(now); start.setHours(0,0,0,0); stepMs = 60*60*1000; points=24; // hourly
-} else if(range==='yesterday'){
-start = new Date(now); start.setDate(now.getDate()-1); start.setHours(0,0,0,0); stepMs=60*60*1000; points=24;
-} else if(range==='30d'){
-start = new Date(now); start.setDate(now.getDate()-29); start.setHours(0,0,0,0); stepMs=24*60*60*1000; points=30; // daily
-} else { // 7d
-start = new Date(now); start.setDate(now.getDate()-6); start.setHours(0,0,0,0); stepMs=24*60*60*1000; points=7; // daily
-}
-const labels=[], values=[];
-let base = range==='today'||range==='yesterday'?rnd(4,18):rnd(50,180);
-for(let i=0;i<points;i++){
-const t = new Date(start.getTime()+i*stepMs);
-labels.push(range==='today'||range==='yesterday'? `${pad2(t.getHours())}:00` : formatDate(t));
-// daily/diurnal pattern bumps
-let bump = 0;
-if(stepMs<24*60*60*1000){ // hourly
-const h=t.getHours();
-if(h>=7&&h<=9) bump+=rnd(8,18); // morning rush
-if(h>=12&&h<=13) bump+=rnd(6,14); // lunch
-if(h>=17&&h<=19) bump+=rnd(9,22); // evening peak
-} else {
-const dow = t.getDay(); // weekend effect
-if(dow===6||dow===0) bump+=rnd(15,40);
-}
-base = clamp(base + rnd(-5,6), 2, 300);
-values.push(clamp(Math.round(base + bump + rnd(-3,3)), 0, 9999));
-}
-return {labels, values};
-}
-function deriveGenderTotals(total){
-// random-ish split
-let f = Math.round(total * (0.35 + Math.random()*0.25));
-let m = Math.round(total * (0.35 + Math.random()*0.25));
-let u = clamp(total - f - m, 0, total);
-return {f,m,u};
-}
-function deriveAgeBuckets(total){
-const buckets = ["0-12","13-17","18-24","25-34","35-44","45-54","55-64","65+"];
-// start with a baseline shape (peak in 25-34 / 35-44)
-const weights = [0.04,0.06,0.12,0.22,0.20,0.17,0.11,0.08].map(w=>w*(0.9+Math.random()*0.2));
-const sumW = weights.reduce((a,b)=>a+b,0);
-const counts = weights.map(w=>Math.round(total * w / sumW));
-// fix rounding drift
-const diff = total - counts.reduce((a,b)=>a+b,0);
-counts[counts.length-1]+=diff;
-return {buckets, counts};
-}
-function summarizeDaily(range, ts){
-const rows=[];
-if(ts.labels.length===24){ // single day hourly -> rollup by day
-const today = new Date();
-const date = range==='yesterday'? new Date(today.getFullYear(),today.getMonth(),today.getDate()-1) : today;
-const total = ts.values.reduce((a,b)=>a+b,0);
-const g = deriveGenderTotals(total);
-const age = deriveAgeBuckets(total);
-rows.push({date:formatDate(date), total, ...g, median: estimateMedianAge(age)});
-} else { // already daily
-for(let i=0;i<ts.labels.length;i++){
-const total = ts.values[i];
-const g = deriveGenderTotals(total);
-const age = deriveAgeBuckets(total);
-rows.push({date:ts.labels[i], total, ...g, median: estimateMedianAge(age)});
-}
-}
-return rows;
-}
-function estimateMedianAge(age){
-// buckets and midpoints
-const mids = [6,15,21,29,39,49,59,72];
-const {counts} = age;
-const total = counts.reduce((a,b)=>a+b,0);
-let acc=0;
-for(let i=0;i<counts.length;i++){
-acc += counts[i];
-if(acc>=total/2) return mids[i];
-}
-return 0;
-}
-function buildLastHour(){
-const rows=[];
-for(let i=59;i>=0;i--){
-rows.push({min: i===0?"adesso":`-${i}′`, val: clamp(rnd(0,4)+ (i<10? rnd(0,3):0), 0, 12)});
-}
-return rows;
-}
-function topHoursFrom(ts){
-const entries=[];
-if(ts.labels.length===24){
-ts.labels.forEach((h,i)=>entries.push({day:"oggi", hour:h, val:ts.values[i]}));
-} else {
-// fabricate top hours using the daily totals as a base
-for(let d=0; d<ts.labels.length; d++){
-const base = Math.max(4, Math.round(ts.values[d]/24));
-const peaks = [rnd(8,10), rnd(12,14), rnd(17,19)];
-for(const p of peaks){ entries.push({day:ts.labels[d], hour: pad2(p)+":00", val: clamp(base + rnd(12,40), 0, 999)}); }
-}
-}
-entries.sort((a,b)=>b.val-a.val);
-return entries.slice(0,8);
-}
-// ====== Charts ======
-let chartTime, chartGender, chartAge;
-function renderCharts(ts, genderTotals, ageBuckets){
-const ctxT = document.getElementById('chartTime');
-const ctxG = document.getElementById('chartGender');
-const ctxA = document.getElementById('chartAge');
-const timeCfg = {
-type:'line',
-data:{
-labels: ts.labels,
-datasets:[{label:'Visitatori', data: ts.values, fill:true, tension:.3}]
-},
-options:{
-responsive:true,
-maintainAspectRatio:false,
-plugins:{legend:{display:false}},
-scales:{
-x:{grid:{color:'#1e2636'}},
-y:{grid:{color:'#1e2636'}, beginAtZero:true}
-}
-}
-};
-const genderCfg = {
-type:'doughnut',
-data:{ labels:['F','M','U'], datasets:[{ data:[genderTotals.f, genderTotals.m, genderTotals.u] }]},
-options:{ plugins:{legend:{position:'bottom'}} }
-};
-const ageCfg = {
-type:'bar',
-data:{ labels: ageBuckets.buckets, datasets:[{label:'Fasce di età', data: ageBuckets.counts}]},
-options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true}} }
-};
-if(chartTime) chartTime.destroy();
-if(chartGender) chartGender.destroy();
-if(chartAge) chartAge.destroy();
-chartTime = new Chart(ctxT, timeCfg);
-chartGender = new Chart(ctxG, genderCfg);
-chartAge = new Chart(ctxA, ageCfg);
-}
-// ====== Tables ======
-function fillTableDaily(rows){
-const tb = document.querySelector('#tblDaily tbody');
-tb.innerHTML = rows.map(r=>`<tr><td>${r.date}</td><td>${r.total}</td><td>${r.f}</td><td>${r.m}</td><td>${r.u}</td><td>${r.median}</td></tr>`).join('');
-}
-function fillTableTop(rows){
-const tb = document.querySelector('#tblTop tbody');
-tb.innerHTML = rows.map(r=>`<tr><td>${r.day}</td><td>${r.hour}</td><td>${r.val}</td></tr>`).join('');
-}
-function fillTableLastHour(rows){
-const tb = document.querySelector('#tblLastHour tbody');
-tb.innerHTML = rows.map(r=>`<tr><td>${r.min}</td><td>${r.val}</td></tr>`).join('');
-}
-// ====== KPIs ======
-function updateKpis(ts, g, age){
-const total = ts.values.reduce((a,b)=>a+b,0);
-const peak = Math.max(...ts.values);
-const peakIdx = ts.values.indexOf(peak);
-const peakLabel = ts.labels[peakIdx];
-const median = estimateMedianAge(age);
-document.getElementById('kpiVisitors').textContent = total.toLocaleString('it-IT');
-document.getElementById('kpiPeak').textContent = peak.toLocaleString('it-IT');
-document.getElementById('kpiPeakSub').textContent = `Picco: ${peakLabel}`;
-document.getElementById('kpiGender').textContent = `${g.f}/${g.m}/${g.u}`;
-document.getElementById('kpiAge').textContent = `${median}`;
-}
-// ====== CSV Export ======
-function exportCSV(ts, dailyRows, age, gender){
-const lines = [];
-lines.push('section,label,value');
-ts.labels.forEach((l,i)=>lines.push(`time,${l},${ts.values[i]}`));
-lines.push('');
-lines.push('daily,date,total,F,M,U,median');
-dailyRows.forEach(r=>lines.push(`daily,${r.date},${r.total},${r.f},${r.m},${r.u},${r.median}`));
-lines.push('');
-lines.push('gender,F,M,U');
-lines.push(`gender,${gender.f},${gender.m},${gender.u}`);
-lines.push('');
-lines.push('age,'+age.buckets.join(','));
-lines.push('age,'+age.counts.join(','));
-const blob = new Blob([lines.join('\n')], {type:'text/csv'});
-const a = document.createElement('a');
-a.href = URL.createObjectURL(blob);
-a.download = `report_mydisplay_vision_${Date.now()}.csv`;
-a.click();
-}
-// ====== Orchestrator ======
-function refresh(){
-const range = document.getElementById('range').value;
-const ts = generateTimeline(range);
-const total = ts.values.reduce((a,b)=>a+b,0);
-const gender = deriveGenderTotals(total);
-const age = deriveAgeBuckets(total);
-renderCharts(ts, gender, age);
-const daily = summarizeDaily(range, ts);
-fillTableDaily(daily);
-fillTableTop(topHoursFrom(ts));
-fillTableLastHour(buildLastHour());
-updateKpis(ts, gender, age);
-// remember last data for CSV
-window.__lastData = {ts, daily, age, gender};
-}
-// Events
-window.addEventListener('DOMContentLoaded', ()=>{
-refresh();
-document.getElementById('regen').addEventListener('click', refresh);
-document.getElementById('range').addEventListener('change', refresh);
-document.getElementById('csv').addEventListener('click', ()=>{
-const d = window.__lastData; if(!d) return; exportCSV(d.ts, d.daily, d.age, d.gender);
-});
-});
-</script>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MyDisplay Vision – Report</title>
+    <style>
+      :root{
+        color-scheme:dark;
+        --bg:#0f1115; --card:#131722; --muted:#94a3b8; --text:#e5e7eb; --border:#202634; --accent:#7dd3fc;
+      }
+      *{ box-sizing:border-box }
+      html, body{ height:100% }
+      body{
+        margin:0; background:var(--bg); color:var(--text);
+        font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",sans-serif;
+      }
+      .wrap{ max-width:1400px; margin:0 auto; padding:18px }
+      header{ display:flex; gap:16px; align-items:center; justify-content:space-between; margin-bottom:16px }
+      .title{ font-size:18px; font-weight:700; letter-spacing:.2px }
+      .controls{ display:flex; flex-wrap:wrap; gap:8px; align-items:center }
+      .card{ background:var(--card); border:1px solid var(--border); border-radius:14px; padding:14px }
+      .kpis{ display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-bottom:14px }
+      .kpi{ display:flex; flex-direction:column; gap:6px }
+      .kpi .lbl{ color:var(--muted); font-size:12px }
+      .kpi .val{ font-size:20px; font-weight:700 }
+      .grid{ display:grid; grid-template-columns:1.5fr 1fr; gap:12px }
+      .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:12px }
+      .sub{ color:var(--muted); font-size:12px }
+      .toolbar{ display:flex; gap:8px; flex-wrap:wrap }
+      button,select{ background:#0b0e16; border:1px solid var(--border); color:var(--text); padding:8px 10px; border-radius:10px; cursor:pointer }
+      button:hover{ border-color:#2c3549 }
+      table{ width:100%; border-collapse:collapse }
+      th,td{ padding:8px 10px; border-bottom:1px solid var(--border); text-align:left }
+      th{ color:var(--muted); font-weight:600; font-size:12px }
+      tbody tr:hover{ background:#0e1420 }
+      .foot{ margin-top:18px; color:var(--muted); font-size:12px }
+
+      /* Chart areas sized by container to avoid growth loops */
+      .chart-box{ position:relative; height:320px; }
+      .chart-sm{ height:180px; }
+      canvas{ display:block; width:100% !important; height:100% !important; }
+
+      @media (max-width: 1100px){ .grid{ grid-template-columns:1fr } }
+      @media (max-width: 900px){ .kpis{ grid-template-columns:repeat(2,1fr) } }
+    </style>
+    <!-- Chart.js via CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <div>
+          <div class="title">MyDisplay Vision – Report metriche (demo dati random)</div>
+          <div class="sub">Conteggio persone · sesso · età · finestra temporale simulata</div>
+        </div>
+        <div class="controls">
+          <div class="toolbar">
+            <label for="range">Intervallo</label>
+            <select id="range">
+              <option value="today">Oggi</option>
+              <option value="yesterday">Ieri</option>
+              <option value="7d" selected>Ultimi 7 giorni</option>
+              <option value="30d">Ultimi 30 giorni</option>
+            </select>
+            <button id="regen">Rigenera dati</button>
+            <button id="csv">Esporta CSV</button>
+          </div>
+        </div>
+      </header>
+
+      <section class="card kpis" id="kpiBox">
+        <div class="kpi">
+          <div class="lbl">Visitatori (stimati)</div>
+          <div class="val" id="kpiVisitors">–</div>
+          <div class="sub" id="kpiVisitorsSub">Somma persone uniche stimate</div>
+        </div>
+        <div class="kpi">
+          <div class="lbl">Pico orario</div>
+          <div class="val" id="kpiPeak">–</div>
+          <div class="sub" id="kpiPeakSub">Ora con passaggi massimi</div>
+        </div>
+        <div class="kpi">
+          <div class="lbl">Genere</div>
+          <div class="val" id="kpiGender">–</div>
+          <div class="sub" id="kpiGenderSub">F / M / U</div>
+        </div>
+        <div class="kpi">
+          <div class="lbl">Età mediana</div>
+          <div class="val" id="kpiAge">–</div>
+          <div class="sub" id="kpiAgeSub">Distribuzione a fasce</div>
+        </div>
+      </section>
+
+      <section class="grid">
+        <div class="card">
+          <div class="sub" style="margin-bottom:8px">Serie temporale visitatori</div>
+          <div class="chart-box">
+            <canvas id="chartTime"></canvas>
+          </div>
+        </div>
+        <div class="card">
+          <div class="sub" style="margin-bottom:8px">Distribuzioni</div>
+          <div class="chart-box chart-sm">
+            <canvas id="chartGender"></canvas>
+          </div>
+          <div style="height:8px"></div>
+          <div class="chart-box chart-sm">
+            <canvas id="chartAge"></canvas>
+          </div>
+        </div>
+      </section>
+
+      <section class="grid2">
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <div class="sub">Riepilogo per giorno/ora</div>
+          </div>
+          <table id="tblDaily">
+            <thead>
+              <tr>
+                <th>Data</th><th>Totale</th><th>F</th><th>M</th><th>U</th><th>Età mediana</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="card">
+          <div class="sub" style="margin-bottom:6px">Top ore per traffico</div>
+          <table id="tblTop">
+            <thead>
+              <tr>
+                <th>Giorno</th><th>Ora</th><th>Passaggi</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <div style="height:10px"></div>
+          <div class="sub">Ultimi 60 minuti (simulati)</div>
+          <table id="tblLastHour">
+            <thead>
+              <tr>
+                <th>Minuto</th><th>Passaggi</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <div class="foot">
+        ⚠️ Demo: tutti i numeri sono generati al volo in modo pseudo‑casuale. Integra i dati reali chiamando la tua API (es. <code>/stats</code>, <code>/metrics</code>) e sostituendo <code>generateFakeData()</code>.
+      </div>
+    </div>
+
+    <script>
+      // ====== Utility ======
+      const rnd = (min,max)=>Math.floor(Math.random()*(max-min+1))+min;
+      const clamp = (v,min,max)=>Math.max(min,Math.min(max,v));
+      function formatDate(d){return d.toISOString().slice(0,10)}
+      function pad2(n){return (n<10?'0':'')+n}
+
+      // ====== Fake data generator ======
+      function generateTimeline(range){
+        const now = new Date();
+        let start, stepMs, points;
+        if(range==='today'){
+          start = new Date(now); start.setHours(0,0,0,0); stepMs = 60*60*1000; points=24; // hourly
+        } else if(range==='yesterday'){
+          start = new Date(now); start.setDate(now.getDate()-1); start.setHours(0,0,0,0); stepMs=60*60*1000; points=24;
+        } else if(range==='30d'){
+          start = new Date(now); start.setDate(now.getDate()-29); start.setHours(0,0,0,0); stepMs=24*60*60*1000; points=30; // daily
+        } else { // 7d
+          start = new Date(now); start.setDate(now.getDate()-6); start.setHours(0,0,0,0); stepMs=24*60*60*1000; points=7; // daily
+        }
+        const labels=[], values=[];
+        let base = range==='today'||range==='yesterday'?rnd(4,18):rnd(50,180);
+        for(let i=0;i<points;i++){
+          const t = new Date(start.getTime()+i*stepMs);
+          labels.push(range==='today'||range==='yesterday'? `${pad2(t.getHours())}:00` : formatDate(t));
+          // daily/diurnal pattern bumps
+          let bump = 0;
+          if(stepMs<24*60*60*1000){ // hourly
+            const h=t.getHours();
+            if(h>=7&&h<=9) bump+=rnd(8,18); // morning rush
+            if(h>=12&&h<=13) bump+=rnd(6,14); // lunch
+            if(h>=17&&h<=19) bump+=rnd(9,22); // evening peak
+          } else {
+            const dow = t.getDay(); // weekend effect
+            if(dow===6||dow===0) bump+=rnd(15,40);
+          }
+          base = clamp(base + rnd(-5,6), 2, 300);
+          values.push(clamp(Math.round(base + bump + rnd(-3,3)), 0, 9999));
+        }
+        return {labels, values};
+      }
+
+      function deriveGenderTotals(total){
+        let f = Math.round(total * (0.35 + Math.random()*0.25));
+        let m = Math.round(total * (0.35 + Math.random()*0.25));
+        let u = clamp(total - f - m, 0, total);
+        return {f,m,u};
+      }
+
+      function deriveAgeBuckets(total){
+        const buckets = ["0-12","13-17","18-24","25-34","35-44","45-54","55-64","65+"];
+        const weights = [0.04,0.06,0.12,0.22,0.20,0.17,0.11,0.08].map(w=>w*(0.9+Math.random()*0.2));
+        const sumW = weights.reduce((a,b)=>a+b,0);
+        const counts = weights.map(w=>Math.round(total * w / sumW));
+        const diff = total - counts.reduce((a,b)=>a+b,0);
+        counts[counts.length-1]+=diff;
+        return {buckets, counts};
+      }
+
+      function summarizeDaily(range, ts){
+        const rows=[];
+        if(ts.labels.length===24){
+          const today = new Date();
+          const date = range==='yesterday'? new Date(today.getFullYear(),today.getMonth(),today.getDate()-1) : today;
+          const total = ts.values.reduce((a,b)=>a+b,0);
+          const g = deriveGenderTotals(total);
+          const age = deriveAgeBuckets(total);
+          rows.push({date:formatDate(date), total, ...g, median: estimateMedianAge(age)});
+        } else {
+          for(let i=0;i<ts.labels.length;i++){
+            const total = ts.values[i];
+            const g = deriveGenderTotals(total);
+            const age = deriveAgeBuckets(total);
+            rows.push({date:ts.labels[i], total, ...g, median: estimateMedianAge(age)});
+          }
+        }
+        return rows;
+      }
+
+      function estimateMedianAge(age){
+        const mids = [6,15,21,29,39,49,59,72];
+        const {counts} = age;
+        const total = counts.reduce((a,b)=>a+b,0);
+        let acc=0;
+        for(let i=0;i<counts.length;i++){
+          acc += counts[i];
+          if(acc>=total/2) return mids[i];
+        }
+        return 0;
+      }
+
+      function buildLastHour(){
+        const rows=[];
+        for(let i=59;i>=0;i--){
+          rows.push({min: i===0?"adesso":`-${i}′`, val: clamp(rnd(0,4)+ (i<10? rnd(0,3):0), 0, 12)});
+        }
+        return rows;
+      }
+
+      function topHoursFrom(ts){
+        const entries=[];
+        if(ts.labels.length===24){
+          ts.labels.forEach((h,i)=>entries.push({day:"oggi", hour:h, val:ts.values[i]}));
+        } else {
+          for(let d=0; d<ts.labels.length; d++){
+            const base = Math.max(4, Math.round(ts.values[d]/24));
+            const peaks = [rnd(8,10), rnd(12,14), rnd(17,19)];
+            for(const p of peaks){ entries.push({day:ts.labels[d], hour: pad2(p)+":00", val: clamp(base + rnd(12,40), 0, 999)}); }
+          }
+        }
+        entries.sort((a,b)=>b.val-a.val);
+        return entries.slice(0,8);
+      }
+
+      // ====== Charts ======
+      let chartTime, chartGender, chartAge;
+      function renderCharts(ts, genderTotals, ageBuckets){
+        const ctxT = document.getElementById('chartTime');
+        const ctxG = document.getElementById('chartGender');
+        const ctxA = document.getElementById('chartAge');
+        const timeCfg = {
+          type:'line',
+          data:{ labels: ts.labels, datasets:[{label:'Visitatori', data: ts.values, fill:true, tension:.3}] },
+          options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{ x:{grid:{color:'#1e2636'}}, y:{grid:{color:'#1e2636'}, beginAtZero:true} } }
+        };
+        const genderCfg = {
+          type:'doughnut',
+          data:{ labels:['F','M','U'], datasets:[{ data:[genderTotals.f, genderTotals.m, genderTotals.u] }]},
+          options:{ plugins:{legend:{position:'bottom'}} }
+        };
+        const ageCfg = {
+          type:'bar',
+          data:{ labels: ageBuckets.buckets, datasets:[{label:'Fasce di età', data: ageBuckets.counts}]},
+          options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true}} }
+        };
+        if(chartTime) chartTime.destroy();
+        if(chartGender) chartGender.destroy();
+        if(chartAge) chartAge.destroy();
+        chartTime = new Chart(ctxT, timeCfg);
+        chartGender = new Chart(ctxG, genderCfg);
+        chartAge = new Chart(ctxA, ageCfg);
+      }
+
+      // ====== Tables ======
+      function fillTableDaily(rows){
+        const tb = document.querySelector('#tblDaily tbody');
+        tb.innerHTML = rows.map(r=>`<tr><td>${r.date}</td><td>${r.total}</td><td>${r.f}</td><td>${r.m}</td><td>${r.u}</td><td>${r.median}</td></tr>`).join('');
+      }
+      function fillTableTop(rows){
+        const tb = document.querySelector('#tblTop tbody');
+        tb.innerHTML = rows.map(r=>`<tr><td>${r.day}</td><td>${r.hour}</td><td>${r.val}</td></tr>`).join('');
+      }
+      function fillTableLastHour(rows){
+        const tb = document.querySelector('#tblLastHour tbody');
+        tb.innerHTML = rows.map(r=>`<tr><td>${r.min}</td><td>${r.val}</td></tr>`).join('');
+      }
+
+      // ====== KPIs ======
+      function updateKpis(ts, g, age){
+        const total = ts.values.reduce((a,b)=>a+b,0);
+        const peak = Math.max(...ts.values);
+        const peakIdx = ts.values.indexOf(peak);
+        const peakLabel = ts.labels[peakIdx];
+        const median = estimateMedianAge(age);
+        document.getElementById('kpiVisitors').textContent = total.toLocaleString('it-IT');
+        document.getElementById('kpiPeak').textContent = peak.toLocaleString('it-IT');
+        document.getElementById('kpiPeakSub').textContent = `Picco: ${peakLabel}`;
+        document.getElementById('kpiGender').textContent = `${g.f}/${g.m}/${g.u}`;
+        document.getElementById('kpiAge').textContent = `${median}`;
+      }
+
+      // ====== CSV Export ======
+      function exportCSV(ts, dailyRows, age, gender){
+        const lines = [];
+        lines.push('section,label,value');
+        ts.labels.forEach((l,i)=>lines.push(`time,${l},${ts.values[i]}`));
+        lines.push('');
+        lines.push('daily,date,total,F,M,U,median');
+        dailyRows.forEach(r=>lines.push(`daily,${r.date},${r.total},${r.f},${r.m},${r.u},${r.median}`));
+        lines.push('');
+        lines.push('gender,F,M,U');
+        lines.push(`gender,${gender.f},${gender.m},${gender.u}`);
+        lines.push('');
+        lines.push('age,'+age.buckets.join(','));
+        lines.push('age,'+age.counts.join(','));
+        const blob = new Blob([lines.join('\n')], {type:'text/csv'});
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `report_mydisplay_vision_${Date.now()}.csv`;
+        a.click();
+      }
+
+      // ====== Orchestrator ======
+      function refresh(){
+        const range = document.getElementById('range').value;
+        const ts = generateTimeline(range);
+        const total = ts.values.reduce((a,b)=>a+b,0);
+        const gender = deriveGenderTotals(total);
+        const age = deriveAgeBuckets(total);
+        renderCharts(ts, gender, age);
+        const daily = summarizeDaily(range, ts);
+        fillTableDaily(daily);
+        fillTableTop(topHoursFrom(ts));
+        fillTableLastHour(buildLastHour());
+        updateKpis(ts, gender, age);
+        window.__lastData = {ts, daily, age, gender};
+      }
+
+      // Events
+      window.addEventListener('DOMContentLoaded', ()=>{
+        refresh();
+        document.getElementById('regen').addEventListener('click', refresh);
+        document.getElementById('range').addEventListener('change', refresh);
+        document.getElementById('csv').addEventListener('click', ()=>{
+          const d = window.__lastData; if(!d) return; exportCSV(d.ts, d.daily, d.age, d.gender);
+        });
+      });
+    </script>
+  </body>
 </html>

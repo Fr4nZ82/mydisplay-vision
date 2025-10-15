@@ -48,6 +48,8 @@
     </style>
     <!-- Chart.js via CDN -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
   </head>
   <body>
     <div class="wrap">
@@ -65,8 +67,9 @@
               <option value="7d" selected>Ultimi 7 giorni</option>
               <option value="30d">Ultimi 30 giorni</option>
             </select>
-            <button id="regen">Rigenera dati</button>
+            <button id="regen">Aggiorna dati</button>
             <button id="csv">Esporta CSV</button>
+            <button id="pdf">Esporta PDF</button>
           </div>
         </div>
       </header>
@@ -102,13 +105,9 @@
           </div>
         </div>
         <div class="card">
-          <div class="sub" style="margin-bottom:8px">Distribuzioni</div>
-          <div class="chart-square">
-            <canvas id="chartGender"></canvas>
-          </div>
-          <div style="height:10px"></div>
-          <div class="chart-box chart-sm">
-            <canvas id="chartAge"></canvas>
+          <div class="sub" style="margin-bottom:8px">Serie per genere (giorni)</div>
+          <div class="chart-box">
+            <canvas id="chartGenderDaily"></canvas>
           </div>
         </div>
       </section>
@@ -252,35 +251,73 @@
       }
 
       // ====== Charts ======
-      let chartTime, chartGender, chartAge;
-      function renderCharts(ts, genderTotals, ageBuckets){
+      let chartTime, chartGenderDaily;
+      function renderCharts(ts, dailyRows){
         const ctxT = document.getElementById('chartTime');
-        const ctxG = document.getElementById('chartGender');
-        const ctxA = document.getElementById('chartAge');
+        const ctxGD = document.getElementById('chartGenderDaily');
+
         const timeCfg = {
           type:'line',
-          data:{ labels: ts.labels, datasets:[{label:'Visitatori', data: ts.values, fill:true, tension:.3}] },
-          options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{ x:{grid:{color:'#1e2636'}}, y:{grid:{color:'#1e2636'}, beginAtZero:true} } }
-        };
-        const genderCfg = {
-          type:'doughnut',
-          data:{ labels:['F','M','U'], datasets:[{ data:[genderTotals.f, genderTotals.m, genderTotals.u] }]},
+          data:{ labels: ts.labels, datasets:[{
+            label:'Visitatori',
+            data: ts.values,
+            fill:true,
+            tension:.35,
+            borderColor:'#7dd3fc',
+            borderWidth:2,
+            pointRadius:2,
+            pointHoverRadius:4,
+            backgroundColor:(ctx)=>{
+              const chart = ctx.chart; const {ctx: c, chartArea} = chart;
+              if(!chartArea) return 'rgba(125,211,252,0.15)';
+              const g = c.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+              g.addColorStop(0,'rgba(125,211,252,0.35)');
+              g.addColorStop(1,'rgba(125,211,252,0.05)');
+              return g;
+            }
+          }] },
           options:{
-            maintainAspectRatio:true,
-            plugins:{ legend:{ position:'right', labels:{ usePointStyle:true } } }
+            responsive:true,
+            maintainAspectRatio:false,
+            plugins:{
+              legend:{display:false},
+              tooltip:{mode:'index', intersect:false}
+            },
+            scales:{
+              x:{grid:{color:'#1e2636'}},
+              y:{grid:{color:'#1e2636'}, beginAtZero:true}
+            }
           }
         };
-        const ageCfg = {
+
+        // Build stacked gender-by-day dataset from dailyRows
+        const labels = dailyRows.map(r=>r.date);
+        const dataF = dailyRows.map(r=>r.f);
+        const dataM = dailyRows.map(r=>r.m);
+        const dataU = dailyRows.map(r=>r.u);
+
+        const genderDailyCfg = {
           type:'bar',
-          data:{ labels: ageBuckets.buckets, datasets:[{label:'Fasce di età', data: ageBuckets.counts}]},
-          options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true}} }
+          data:{ labels, datasets:[
+            {label:'Femminile', data:dataF, backgroundColor:'#f472b6', borderColor:'#be185d', borderWidth:1, stack:'gender'},
+            {label:'Maschile', data:dataM, backgroundColor:'#60a5fa', borderColor:'#1d4ed8', borderWidth:1, stack:'gender'},
+            {label:'Sconosciuto', data:dataU, backgroundColor:'#94a3b8', borderColor:'#475569', borderWidth:1, stack:'gender'}
+          ]},
+          options:{
+            responsive:true,
+            maintainAspectRatio:false,
+            plugins:{ legend:{ position:'top', labels:{ usePointStyle:true } } },
+            scales:{
+              x:{ stacked:true, grid:{color:'#1e2636'} },
+              y:{ stacked:true, beginAtZero:true, grid:{color:'#1e2636'} }
+            }
+          }
         };
+
         if(chartTime) chartTime.destroy();
-        if(chartGender) chartGender.destroy();
-        if(chartAge) chartAge.destroy();
+        if(chartGenderDaily) chartGenderDaily.destroy();
         chartTime = new Chart(ctxT, timeCfg);
-        chartGender = new Chart(ctxG, genderCfg);
-        chartAge = new Chart(ctxA, ageCfg);
+        chartGenderDaily = new Chart(ctxGD, genderDailyCfg);
       }
 
       // ====== Tables ======
@@ -369,15 +406,61 @@
         a.click();
       }
 
+      // ====== PDF Export ======
+      function exportPDF(ts, dailyRows){
+        const { jsPDF } = window.jspdf || {};
+        if(!jsPDF){ alert('Libreria jsPDF non disponibile'); return; }
+        const doc = new jsPDF('p','mm','a4');
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const margin = 12;
+        let y = margin;
+        const now = new Date();
+
+        // Title
+        doc.setFont('helvetica','bold'); doc.setFontSize(16);
+        doc.text('MyDisplay Vision – Report', margin, y); y+=8;
+        doc.setFont('helvetica','normal'); doc.setFontSize(10);
+        doc.text(`Generato il: ${now.toLocaleString('it-IT')}`, margin, y); y+=6;
+
+        // Helper to add chart
+        const addChart = (chart, title)=>{
+          if(!chart) return; doc.setFont('helvetica','bold'); doc.setFontSize(12);
+          doc.text(title, margin, y); y+=5;
+          const img = chart.toBase64Image('image/png', 1);
+          const cw = chart.canvas.width || 800; const ch = chart.canvas.height || 400;
+          const imgW = pageWidth - margin*2; const imgH = (ch/cw) * imgW;
+          doc.addImage(img, 'PNG', margin, y, imgW, imgH, undefined, 'FAST'); y += imgH + 6;
+        };
+
+        addChart(chartTime, 'Serie temporale visitatori');
+        addChart(chartGenderDaily, 'Serie per genere (giorni)');
+
+        // Daily table
+        if(Array.isArray(dailyRows) && dailyRows.length){
+          const head = [['Data','Totale','F','M','U','Età mediana']];
+          const body = dailyRows.map(r=>[r.date, r.total, r.f, r.m, r.u, r.median]);
+          // Ensure plugin is present
+          if(typeof doc.autoTable === 'function'){
+            doc.autoTable({ startY: y, head, body, styles:{ fontSize:9 } });
+          } else {
+            doc.setFont('helvetica','bold'); doc.text('Riepilogo giornaliero', margin, y); y+=5;
+            body.forEach(row=>{ doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.text(row.join(' | '), margin, y); y+=5; });
+          }
+        }
+
+        const tsName = `${now.getFullYear()}${('0'+(now.getMonth()+1)).slice(-2)}${('0'+now.getDate()).slice(-2)}_${('0'+now.getHours()).slice(-2)}${('0'+now.getMinutes()).slice(-2)}${('0'+now.getSeconds()).slice(-2)}`;
+        doc.save(`report_mydisplay_vision_${tsName}.pdf`);
+      }
+
       // ====== Orchestrator ======
       function refresh(){
         const range = document.getElementById('range').value;
         const ts = generateTimeline(range);
+        const daily = summarizeDaily(range, ts);
         const total = ts.values.reduce((a,b)=>a+b,0);
         const gender = deriveGenderTotals(total);
         const age = deriveAgeBuckets(total);
-        renderCharts(ts, gender, age);
-        const daily = summarizeDaily(range, ts);
+        renderCharts(ts, daily);
         fillTableDaily(daily);
         fillTableTop(topHoursFrom(ts));
         updateKpis(ts, gender, age);
@@ -391,6 +474,9 @@
         document.getElementById('range').addEventListener('change', refresh);
         document.getElementById('csv').addEventListener('click', ()=>{
           const d = window.__lastData; if(!d) return; exportCSV(d.ts, d.daily, d.age, d.gender);
+        });
+        document.getElementById('pdf').addEventListener('click', ()=>{
+          const d = window.__lastData; if(!d) return; exportPDF(d.ts, d.daily);
         });
       });
     </script>

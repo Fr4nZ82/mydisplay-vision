@@ -827,9 +827,19 @@ def run_pipeline(state: HealthState, cfg) -> None:
                                         except Exception:
                                             pass
                                     elif new_gid != old_gid:
-                                        tstate["global_id"] = new_gid
+                                        # Unifica i due ID per stabilità: preferisci quello esistente (old_gid)
                                         try:
-                                            log_event("REID_CORRECT", tid=int(tid), new_gid=int(new_gid))
+                                            if hasattr(reid, "merge_ids"):
+                                                winner = reid.merge_ids(prefer=int(old_gid), other=int(new_gid))
+                                            else:
+                                                # fallback: usa il canon del new_gid
+                                                winner = reid.canon(new_gid)
+                                        except Exception:
+                                            # in caso di problemi, resta su old_gid se valido
+                                            winner = int(old_gid) if old_gid is not None else int(new_gid)
+                                        tstate["global_id"] = int(winner)
+                                        try:
+                                            log_event("REID_CORRECT", tid=int(tid), new_gid=int(winner))
                                         except Exception:
                                             pass
                                     tstate["assigned_with_face"] = True

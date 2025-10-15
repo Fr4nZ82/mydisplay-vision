@@ -501,6 +501,19 @@ class FaceReID:
                 pass
         return self.canon(winner)
 
+    def merge_ids(self, prefer: int, other: int) -> int:
+        """Unisce due ID nella memoria. Preferisce conservare `prefer` come vincente.
+        Ritorna l'ID vincente canonico."""
+        try:
+            return self._merge_ids(int(prefer), int(other))
+        except Exception:
+            # in caso di errore, prova a restituire il prefer o l'altro se esistono
+            if int(prefer) in self.mem:
+                return self.canon(int(prefer))
+            if int(other) in self.mem:
+                return self.canon(int(other))
+            return int(prefer)
+
     def _sim_to_pid_body(self, pid: int, vec: np.ndarray) -> float:
         info = self.mem.get(pid)
         if not info:
@@ -511,6 +524,7 @@ class FaceReID:
             return -1.0
 
         return max(_cosine_sim(b, vec) for b in bank)
+
 
     # --- NEW: fusione ranking (rispetta soglie finali) ---
     @staticmethod

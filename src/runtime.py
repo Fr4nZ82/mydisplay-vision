@@ -667,12 +667,20 @@ def run_pipeline(state: HealthState, cfg) -> None:
 
                     body_crop_to_pass = person_crop if track_src == "person" else None
 
-                    # Crea subito un GID solo se abbiamo un embedding corpo disponibile.
-                    # Se non c'è corpo (o backend corpo), aspetta la classificazione per committare il volto.
-                    if body_crop_to_pass is not None and getattr(reid, "body_backend", None) is not None:
+                    # Commit via body: applica un gating minimo su stabilità e dimensione
+                    hits = int(t.get("hits", 0))
+                    body_commit_min_hits = int(getattr(cfg, "body_commit_min_hits", getattr(cfg, "tracker_min_hits", 4)))
+                    min_body_h_px_cfg = int(getattr(cfg, "reid_min_body_h_px", 0))
+                    body_h = int(person_crop.shape[0]) if (person_crop is not None and hasattr(person_crop, 'shape')) else 0
+
+                    if (
+                        body_crop_to_pass is not None and
+                        getattr(reid, "body_backend", None) is not None and
+                        hits >= body_commit_min_hits and
+                        (min_body_h_px_cfg <= 0 or body_h >= min_body_h_px_cfg)
+                    ):
                         try:
                             if bool(getattr(cfg, "debug_reid_verbose", False)):
-                                body_h = int(person_crop.shape[0]) if (body_crop_to_pass is not None) else None
                                 log_event("REID_INPUT", tid=int(tid), hasFace=False, faceSize=None, hasBody=True, bodyH=body_h, src=track_src)
                         except Exception:
                             pass
@@ -682,14 +690,15 @@ def run_pipeline(state: HealthState, cfg) -> None:
                                 kps5=None,
                                 body_bgr_crop=body_crop_to_pass
                             )
-                        except TypeError:
-                            gid = reid.assign_global_id(None, None)
-                        gid = reid.canon(gid)
-                        tstate["global_id"] = gid
-                        tstate["assigned_with_face"] = False
-                        try:
-                            log_event("REID_ASSIGN", tid=int(tid), gid=int(gid), withFace=False)
+                            gid = reid.canon(gid)
+                            tstate["global_id"] = gid
+                            tstate["assigned_with_face"] = False
+                            try:
+                                log_event("REID_ASSIGN", tid=int(tid), gid=int(gid), withFace=False)
+                            except Exception:
+                                pass
                         except Exception:
+                            # Se non riusciamo a committare via body, non creare ID di fallback
                             pass
 
                 # salva anche il face bbox corrente (per classificazione) e i landmark se presenti

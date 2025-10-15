@@ -473,18 +473,14 @@ class FaceReID:
             except Exception:
                 body_vec = None
 
-        # Nessun segnale → nuovo ID
+        # Nessun segnale → non creare un nuovo ID (evita "ID vuoti")
         if feat is None and body_vec is None:
-            gid = self.next_global_id
-            self.next_global_id += 1
-            self.mem[gid] = {'feats': [], 'body': [], 'last': now, 'created': now, 'hits': 1,
-                             'meta': {'gender_hist': {}, 'age_hist': {}}}
             if self.debug:
                 try:
-                    _log_event("REID_NEW", gid=int(gid), reason="no_signals")
+                    _log_event("REID_SKIP", reason="no_signals")
                 except Exception:
                     pass
-            return gid
+            return -1
 
         # Costruisci candidati con similarità disponibili
         def _id_has_face(pid: int) -> bool:
@@ -499,8 +495,6 @@ class FaceReID:
             fused = self._fuse(fs, bs, None)
             cand.append((pid, fs, bs, fused))
         cand.sort(key=lambda r: r[3], reverse=True)
-
-
 
 
         # ------------- Decisioni -------------

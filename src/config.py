@@ -134,6 +134,9 @@ _DEFAULTS: Dict[str, Any] = {
     "body_reid_target": 0,
     "body_only_th": 0.65,
     "reid_allow_body_seed": True,
+    # Gating commit via corpo: frame minimi prima di creare GID solo-body
+    # Se non impostato, cade su tracker_min_hits
+    "body_commit_min_hits": 5,
 
     # --- Dedup conteggi ---
     "count_dedup_ttl_sec": 600,

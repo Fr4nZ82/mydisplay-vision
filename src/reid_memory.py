@@ -439,6 +439,11 @@ class FaceReID:
             try:
                 fh, fw = face_bgr_crop.shape[:2]
                 if min(fw, fh) < min_face_px:
+                    if self.debug:
+                        try:
+                            _log_event("REID_DBG", kind="face", step="min_px_filter", fw=int(fw), fh=int(fh), min_px=int(min_face_px))
+                        except Exception:
+                            pass
                     face_bgr_crop = None
             except Exception:
                 pass
@@ -453,6 +458,14 @@ class FaceReID:
             if face_for_feat is None:
                 face_for_feat = face_bgr_crop
             feat = self.backend.feat(face_for_feat)
+            if self.debug:
+                try:
+                    if feat is None:
+                        _log_event("REID_DBG", kind="face", step="feat_none", backend=str(self.backend_name), kps=bool(kps5 is not None), shape=(int(face_for_feat.shape[1]), int(face_for_feat.shape[0])) if hasattr(face_for_feat, 'shape') else None)
+                    else:
+                        _log_event("REID_DBG", kind="face", step="feat_ok", dim=(int(feat.shape[0]) if hasattr(feat, 'shape') else None))
+                except Exception:
+                    pass
 
         # 2) embedding corpo (se backend presente + crop valido)
         body_vec = None
@@ -462,6 +475,11 @@ class FaceReID:
             try:
                 bh = int(body_bgr_crop.shape[0])
                 if bh < min_body_h_px:
+                    if self.debug:
+                        try:
+                            _log_event("REID_DBG", kind="body", step="min_h_filter", bh=int(bh), min_h=int(min_body_h_px))
+                        except Exception:
+                            pass
                     body_bgr_crop = None
             except Exception:
                 pass
@@ -470,6 +488,12 @@ class FaceReID:
                 body_vec = self.body_backend.embed(body_bgr_crop)
                 if body_vec is not None:
                     body_vec = _l2_normalize(np.asarray(body_vec, dtype=np.float32))
+                else:
+                    if self.debug:
+                        try:
+                            _log_event("REID_DBG", kind="body", step="feat_none", backend=str(getattr(self.body_backend, 'mode', getattr(self.body_backend, '__class__', type('x',(),{})).__name__)), shape=(int(body_bgr_crop.shape[1]), int(body_bgr_crop.shape[0])) if hasattr(body_bgr_crop, 'shape') else None)
+                        except Exception:
+                            pass
             except Exception:
                 body_vec = None
 

@@ -65,6 +65,7 @@
             <select id="range">
               <option value="today">Oggi</option>
               <option value="yesterday">Ieri</option>
+              <option value="7d" selected>Ultima settimana</option>
               <option value="31d" selected>Ultimi 31 giorni</option>
               <option value="30d">Ultimi 30 giorni (giorni esatti)</option>
             </select>
@@ -168,6 +169,12 @@
           start = new Date(now); start.setHours(0,0,0,0); stepMs = 60*60*1000; points=24; // hourly
         } else if(range==='yesterday'){
           start = new Date(now); start.setDate(now.getDate()-1); start.setHours(0,0,0,0); stepMs=60*60*1000; points=24;
+        } else if(range==='7d'){
+          start = new Date(now);
+          start.setDate(now.getDate() - 6);
+          start.setHours(0,0,0,0);
+          stepMs = 24*60*60*1000;
+          points = 7;
         } else if(range==='30d'){
           start = new Date(now); start.setDate(now.getDate()-29); start.setHours(0,0,0,0); stepMs=24*60*60*1000; points=30;
         } else { // 31d (default)

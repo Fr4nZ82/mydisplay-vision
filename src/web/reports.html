@@ -382,19 +382,24 @@
         const dataM = rows.map(r=>r.m);
         const dataU = rows.map(r=>r.u);
 
-        const categoryPct = Math.max(0.6, Math.min(1.0, 18 / nCols));   // meno spazio tra gruppi
-        const barPct = Math.max(0.8, Math.min(1.0, 14 / nCols));        // barre più piene
-        const maxBarThickness = Math.max(10, Math.min(24, Math.round(300 / nCols))); // spessore massimo più alto
+        const categoryPct = Math.max(0.85, Math.min(1.0, 28 / nCols));   // quasi nessuno spazio tra i gruppi
+        const barPct = Math.max(0.95, Math.min(1.0, 24 / nCols));        // barre molto piene
+        const maxBarThickness = Math.max(14, Math.min(40, Math.round(400 / nCols)));
+        // stile comune per tutte le barre
+        const commonBarStyle = {
+          borderColor: '#000000',
+          borderWidth: 2,
+          categoryPercentage: categoryPct,
+          barPercentage: barPct,
+          maxBarThickness
+        };
 
         return {
           labels,
           datasets: [
-            {label:'Femminile', data:dataF, backgroundColor:getComputedStyle(document.documentElement).getPropertyValue('--f').trim(), stack:'S',
-             borderWidth:0.5, borderColor:'#be185d', categoryPercentage:categoryPct, barPercentage:barPct, maxBarThickness},
-            {label:'Maschile', data:dataM, backgroundColor:getComputedStyle(document.documentElement).getPropertyValue('--m').trim(), stack:'S',
-             borderWidth:0.5, borderColor:'#1d4ed8', categoryPercentage:categoryPct, barPercentage:barPct, maxBarThickness},
-            {label:'Sconosciuto', data:dataU, backgroundColor:getComputedStyle(document.documentElement).getPropertyValue('--u').trim(), stack:'S',
-             borderWidth:0.5, borderColor:'#475569', categoryPercentage:categoryPct, barPercentage:barPct, maxBarThickness}
+            {label:'Femminile', data:dataF, backgroundColor:getComputedStyle(document.documentElement).getPropertyValue('--f').trim(), stack:'S', ...commonBarStyle},
+            {label:'Maschile', data:dataM, backgroundColor:getComputedStyle(document.documentElement).getPropertyValue('--m').trim(), stack:'S', ...commonBarStyle},
+            {label:'Sconosciuto', data:dataU, backgroundColor:getComputedStyle(document.documentElement).getPropertyValue('--u').trim(), stack:'S', ...commonBarStyle}
           ]
         };
       }
@@ -411,10 +416,18 @@
           stack:'AGE'
         }));
 
-        const categoryPct = Math.max(0.6, Math.min(1.0, 18 / nCols));   // meno spazio tra gruppi
-        const barPct = Math.max(0.8, Math.min(1.0, 14 / nCols));        // barre più piene
-        const maxBarThickness = Math.max(10, Math.min(24, Math.round(300 / nCols))); // spessore massimo più alto
-        datasets.forEach(ds=>{ ds.categoryPercentage=categoryPct; ds.barPercentage=barPct; ds.maxBarThickness=maxBarThickness; });
+        const categoryPct = Math.max(0.85, Math.min(1.0, 28 / nCols));   // quasi nessuno spazio tra i gruppi
+        const barPct = Math.max(0.95, Math.min(1.0, 24 / nCols));        // barre molto piene
+        const maxBarThickness = Math.max(14, Math.min(40, Math.round(400 / nCols)));
+        // stile comune per tutte le barre
+        const commonBarStyle = {
+          borderColor: '#000000',
+          borderWidth: 2,
+          categoryPercentage: categoryPct,
+          barPercentage: barPct,
+          maxBarThickness
+        };
+        datasets.forEach(ds => Object.assign(ds, commonBarStyle));
 
         return { labels, datasets };
       }

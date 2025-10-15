@@ -941,18 +941,9 @@ def run_pipeline(state: HealthState, cfg) -> None:
                     fx, fy, fw, fh = map(int, fb)
                     cv2.rectangle(vis, (fx, fy), (fx + fw, fy + fh), (0, 255, 0), 1)
 
-                # opzionale: non disegnare tracce non committate (senza gid o senza gender valido)
+                                # opzionale: non disegnare tracce non committate (nascondi solo se NON hanno un global_id)
                 if debug_hide_uncommitted:
-                    assigned_with_face = tracker.tracks.get(tid, {}).get("assigned_with_face", False)
-                    gender_valid = (t.get("gender", "unknown") in ("male", "female")) and (float(t.get("conf", 0.0)) >= float(getattr(cfg, "cls_min_conf", 0.35)))
-                    if not assigned_with_face and not gender_valid:
-                        continue
-
-                                # opzionale: non disegnare tracce non committate (senza gid o senza gender valido)
-                if debug_hide_uncommitted:
-                    assigned_with_face = tracker.tracks.get(tid, {}).get("assigned_with_face", False)
-                    gender_valid = (t.get("gender", "unknown") in ("male", "female")) and (float(t.get("conf", 0.0)) >= float(getattr(cfg, "cls_min_conf", 0.35)))
-                    if not assigned_with_face and not gender_valid:
+                    if "global_id" not in tstate:
                         continue
 
                 g = t.get("gender", "unknown")

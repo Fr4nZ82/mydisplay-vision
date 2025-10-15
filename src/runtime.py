@@ -690,12 +690,16 @@ def run_pipeline(state: HealthState, cfg) -> None:
                                 kps5=None,
                                 body_bgr_crop=body_crop_to_pass
                             )
-                            gid = reid.canon(gid)
-                            tstate["global_id"] = gid
-                            tstate["assigned_with_face"] = False
-                            try:
-                                log_event("REID_ASSIGN", tid=int(tid), gid=int(gid), withFace=False)
-                            except Exception:
+                            if isinstance(gid, int) and gid > 0:
+                                gid = reid.canon(gid)
+                                tstate["global_id"] = gid
+                                tstate["assigned_with_face"] = False
+                                try:
+                                    log_event("REID_ASSIGN", tid=int(tid), gid=int(gid), withFace=False)
+                                except Exception:
+                                    pass
+                            else:
+                                # nessun ID valido: non assegnare
                                 pass
                         except Exception:
                             # Se non riusciamo a committare via body, non creare ID di fallback
@@ -812,22 +816,24 @@ def run_pipeline(state: HealthState, cfg) -> None:
                                     )
                                 except TypeError:
                                     new_gid = reid.assign_global_id(face_bgr_crop=face_roi, kps5=None)
-                                new_gid = reid.canon(new_gid)
-                                old_gid = tstate.get("global_id", None)
-                                if old_gid is None:
-                                    # primo assign via volto
-                                    tstate["global_id"] = new_gid
-                                    try:
-                                        log_event("REID_ASSIGN", tid=int(tid), gid=int(new_gid), withFace=True)
-                                    except Exception:
-                                        pass
-                                elif new_gid != old_gid:
-                                    tstate["global_id"] = new_gid
-                                    try:
-                                        log_event("REID_CORRECT", tid=int(tid), new_gid=int(new_gid))
-                                    except Exception:
-                                        pass
-                                tstate["assigned_with_face"] = True
+                                if isinstance(new_gid, int) and new_gid > 0:
+                                    new_gid = reid.canon(new_gid)
+                                    old_gid = tstate.get("global_id", None)
+                                    if old_gid is None:
+                                        # primo assign via volto
+                                        tstate["global_id"] = new_gid
+                                        try:
+                                            log_event("REID_ASSIGN", tid=int(tid), gid=int(new_gid), withFace=True)
+                                        except Exception:
+                                            pass
+                                    elif new_gid != old_gid:
+                                        tstate["global_id"] = new_gid
+                                        try:
+                                            log_event("REID_CORRECT", tid=int(tid), new_gid=int(new_gid))
+                                        except Exception:
+                                            pass
+                                    tstate["assigned_with_face"] = True
+                                    tracker.tracks[tid] = tstate
                                 tracker.tracks[tid] = tstate
                         except Exception:
                             pass

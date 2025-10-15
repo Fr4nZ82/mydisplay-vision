@@ -152,7 +152,7 @@ class _BackendArcFaceOV:
         # opzionale: potremmo leggere shape input per validazione
 
     @staticmethod
-    def _preprocess(face_bgr: np.ndarray) -> np.ndarray:
+    def _prep_arcface_rgb(face_bgr: np.ndarray) -> np.ndarray:
         img = cv2.cvtColor(face_bgr, cv2.COLOR_BGR2RGB)
         img = cv2.resize(img, (112, 112), interpolation=cv2.INTER_LINEAR)
         img = img.astype(np.float32)
@@ -160,17 +160,63 @@ class _BackendArcFaceOV:
         blob = np.transpose(img, (2, 0, 1))[None, ...]
         return blob
 
+    @staticmethod
+    def _prep_arcface_bgr(face_bgr: np.ndarray) -> np.ndarray:
+        img = cv2.resize(face_bgr, (112, 112), interpolation=cv2.INTER_LINEAR).astype(np.float32)
+        img = (img - 127.5) / 128.0
+        blob = np.transpose(img, (2, 0, 1))[None, ...]
+        return blob
+
+    @staticmethod
+    def _prep_unit_rgb(face_bgr: np.ndarray) -> np.ndarray:
+        img = cv2.cvtColor(face_bgr, cv2.COLOR_BGR2RGB)
+        img = cv2.resize(img, (112, 112), interpolation=cv2.INTER_LINEAR).astype(np.float32) / 255.0
+        # mappa a [-1,1]
+        img = (img - 0.5) / 0.5
+        blob = np.transpose(img, (2, 0, 1))[None, ...]
+        return blob
+
+    @staticmethod
+    def _prep_unit_bgr(face_bgr: np.ndarray) -> np.ndarray:
+        img = cv2.resize(face_bgr, (112, 112), interpolation=cv2.INTER_LINEAR).astype(np.float32) / 255.0
+        img = (img - 0.5) / 0.5
+        blob = np.transpose(img, (2, 0, 1))[None, ...]
+        return blob
+
     def feat(self, face_bgr_any: np.ndarray) -> Optional[np.ndarray]:
         if face_bgr_any is None or face_bgr_any.size == 0:
             return None
-        try:
-            blob = self._preprocess(face_bgr_any)
-            res = self.compiled([blob])
-            out = list(res.values())[0]
-            vec = np.asarray(out).reshape(-1).astype(np.float32)
-            return _l2_normalize(vec)
-        except Exception:
-            return None
+        # Prova catena di preprocess finché non otteniamo un embedding
+        variants = [
+            ("arcface_rgb", self._prep_arcface_rgb),
+            ("arcface_bgr", self._prep_arcface_bgr),
+            ("unit_rgb", self._prep_unit_rgb),
+            ("unit_bgr", self._prep_unit_bgr),
+        ]
+        last_exc = None
+        for name, fn in variants:
+            try:
+                blob = fn(face_bgr_any)
+                res = self.compiled([blob])
+                out = list(res.values())[0]
+                vec = np.asarray(out).reshape(-1).astype(np.float32)
+                if vec.size == 0 or not np.isfinite(vec).all():
+                    raise RuntimeError("empty_or_nan_vec")
+                # Log diagnostico opzionale
+                try:
+                    _log_event("REID_DBG", kind="face", step="ov_feat_ok", backend="arcface_ov", preproc=name, dim=int(vec.size))
+                except Exception:
+                    pass
+                return _l2_normalize(vec)
+            except Exception as e:
+                last_exc = e
+                try:
+                    _log_event("REID_DBG", kind="face", step="ov_try_fail", backend="arcface_ov", preproc=name, err=str(e))
+                except Exception:
+                    pass
+                continue
+        # tutte le varianti fallite
+        return None
 
 
 

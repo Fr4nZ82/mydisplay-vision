@@ -141,7 +141,7 @@ class _BackendArcFaceONNX:
 class _BackendArcFaceOV:
     """
     Backend ArcFace per OpenVINO IR (.xml+.bin), es. GhostFaceNet_W1.3_S1_ArcFace.
-    Preprocess: RGB 112x112, (img - 127.5)/128.0 → NCHW, output L2-normalizzato.
+    Preprocess: RGB 112x112, (img - 127.5)/128.0. Il layout atteso può essere NCHW (1,3,112,112) o NHWC (1,112,112,3).
     """
     def __init__(self, model_path: str):
         if _OVCore is None:
@@ -149,10 +149,33 @@ class _BackendArcFaceOV:
         core = _OVCore()
         model = core.read_model(model_path)
         self.compiled = core.compile_model(model, "CPU")
-        # opzionale: potremmo leggere shape input per validazione
+        # Prova a dedurre layout input: preferisci NHWC se l'ultima dim è 3
+        self.prefer_nhwc = True
+        try:
+            inp = self.compiled.input(0)
+            shp = list(getattr(inp, "shape", []))
+            # shape può contenere Dimension; prova a castare a int
+            dims = []
+            for d in shp:
+                try:
+                    dims.append(int(d))
+                except Exception:
+                    # per Dimension, prova get_length()
+                    try:
+                        dims.append(int(d.get_length()))
+                    except Exception:
+                        dims.append(-1)
+            if len(dims) == 4:
+                if dims[-1] == 3:
+                    self.prefer_nhwc = True
+                elif dims[1] == 3:
+                    self.prefer_nhwc = False
+        except Exception:
+            pass
 
+    # --- Preprocess CHW (NCHW) ---
     @staticmethod
-    def _prep_arcface_rgb(face_bgr: np.ndarray) -> np.ndarray:
+    def _prep_arcface_rgb_chw(face_bgr: np.ndarray) -> np.ndarray:
         img = cv2.cvtColor(face_bgr, cv2.COLOR_BGR2RGB)
         img = cv2.resize(img, (112, 112), interpolation=cv2.INTER_LINEAR)
         img = img.astype(np.float32)
@@ -161,39 +184,76 @@ class _BackendArcFaceOV:
         return blob
 
     @staticmethod
-    def _prep_arcface_bgr(face_bgr: np.ndarray) -> np.ndarray:
+    def _prep_arcface_bgr_chw(face_bgr: np.ndarray) -> np.ndarray:
         img = cv2.resize(face_bgr, (112, 112), interpolation=cv2.INTER_LINEAR).astype(np.float32)
         img = (img - 127.5) / 128.0
         blob = np.transpose(img, (2, 0, 1))[None, ...]
         return blob
 
     @staticmethod
-    def _prep_unit_rgb(face_bgr: np.ndarray) -> np.ndarray:
+    def _prep_unit_rgb_chw(face_bgr: np.ndarray) -> np.ndarray:
         img = cv2.cvtColor(face_bgr, cv2.COLOR_BGR2RGB)
         img = cv2.resize(img, (112, 112), interpolation=cv2.INTER_LINEAR).astype(np.float32) / 255.0
-        # mappa a [-1,1]
         img = (img - 0.5) / 0.5
         blob = np.transpose(img, (2, 0, 1))[None, ...]
         return blob
 
     @staticmethod
-    def _prep_unit_bgr(face_bgr: np.ndarray) -> np.ndarray:
+    def _prep_unit_bgr_chw(face_bgr: np.ndarray) -> np.ndarray:
         img = cv2.resize(face_bgr, (112, 112), interpolation=cv2.INTER_LINEAR).astype(np.float32) / 255.0
         img = (img - 0.5) / 0.5
         blob = np.transpose(img, (2, 0, 1))[None, ...]
         return blob
 
+    # --- Preprocess HWC (NHWC) ---
+    @staticmethod
+    def _prep_arcface_rgb_hwc(face_bgr: np.ndarray) -> np.ndarray:
+        img = cv2.cvtColor(face_bgr, cv2.COLOR_BGR2RGB)
+        img = cv2.resize(img, (112, 112), interpolation=cv2.INTER_LINEAR).astype(np.float32)
+        img = (img - 127.5) / 128.0
+        blob = img[None, ...]  # (1,112,112,3)
+        return blob
+
+    @staticmethod
+    def _prep_arcface_bgr_hwc(face_bgr: np.ndarray) -> np.ndarray:
+        img = cv2.resize(face_bgr, (112, 112), interpolation=cv2.INTER_LINEAR).astype(np.float32)
+        img = (img - 127.5) / 128.0
+        blob = img[None, ...]
+        return blob
+
+    @staticmethod
+    def _prep_unit_rgb_hwc(face_bgr: np.ndarray) -> np.ndarray:
+        img = cv2.cvtColor(face_bgr, cv2.COLOR_BGR2RGB)
+        img = cv2.resize(img, (112, 112), interpolation=cv2.INTER_LINEAR).astype(np.float32) / 255.0
+        img = (img - 0.5) / 0.5
+        blob = img[None, ...]
+        return blob
+
+    @staticmethod
+    def _prep_unit_bgr_hwc(face_bgr: np.ndarray) -> np.ndarray:
+        img = cv2.resize(face_bgr, (112, 112), interpolation=cv2.INTER_LINEAR).astype(np.float32) / 255.0
+        img = (img - 0.5) / 0.5
+        blob = img[None, ...]
+        return blob
+
     def feat(self, face_bgr_any: np.ndarray) -> Optional[np.ndarray]:
         if face_bgr_any is None or face_bgr_any.size == 0:
             return None
-        # Prova catena di preprocess finché non otteniamo un embedding
-        variants = [
-            ("arcface_rgb", self._prep_arcface_rgb),
-            ("arcface_bgr", self._prep_arcface_bgr),
-            ("unit_rgb", self._prep_unit_rgb),
-            ("unit_bgr", self._prep_unit_bgr),
+        # Prepara lista di varianti: prova prima il layout dedotto
+        variants_nchw = [
+            ("arcface_rgb_chw", self._prep_arcface_rgb_chw),
+            ("arcface_bgr_chw", self._prep_arcface_bgr_chw),
+            ("unit_rgb_chw", self._prep_unit_rgb_chw),
+            ("unit_bgr_chw", self._prep_unit_bgr_chw),
         ]
-        last_exc = None
+        variants_nhwc = [
+            ("arcface_rgb_hwc", self._prep_arcface_rgb_hwc),
+            ("arcface_bgr_hwc", self._prep_arcface_bgr_hwc),
+            ("unit_rgb_hwc", self._prep_unit_rgb_hwc),
+            ("unit_bgr_hwc", self._prep_unit_bgr_hwc),
+        ]
+        variants = (variants_nhwc + variants_nchw) if self.prefer_nhwc else (variants_nchw + variants_nhwc)
+
         for name, fn in variants:
             try:
                 blob = fn(face_bgr_any)
@@ -202,23 +262,18 @@ class _BackendArcFaceOV:
                 vec = np.asarray(out).reshape(-1).astype(np.float32)
                 if vec.size == 0 or not np.isfinite(vec).all():
                     raise RuntimeError("empty_or_nan_vec")
-                # Log diagnostico opzionale
                 try:
                     _log_event("REID_DBG", kind="face", step="ov_feat_ok", backend="arcface_ov", preproc=name, dim=int(vec.size))
                 except Exception:
                     pass
                 return _l2_normalize(vec)
             except Exception as e:
-                last_exc = e
                 try:
                     _log_event("REID_DBG", kind="face", step="ov_try_fail", backend="arcface_ov", preproc=name, err=str(e))
                 except Exception:
                     pass
                 continue
-        # tutte le varianti fallite
         return None
-
-
 
 class FaceReID:
     """

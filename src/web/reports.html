@@ -382,9 +382,9 @@
         const dataM = rows.map(r=>r.m);
         const dataU = rows.map(r=>r.u);
 
-        const categoryPct = Math.max(0.20, Math.min(0.9, 7 / nCols));
-        const barPct = Math.max(0.35, Math.min(0.9, 6 / nCols));
-        const maxBarThickness = Math.max(6, Math.min(14, Math.round(120 / nCols)));
+        const categoryPct = Math.max(0.6, Math.min(1.0, 18 / nCols));   // meno spazio tra gruppi
+        const barPct = Math.max(0.8, Math.min(1.0, 14 / nCols));        // barre più piene
+        const maxBarThickness = Math.max(10, Math.min(24, Math.round(300 / nCols))); // spessore massimo più alto
 
         return {
           labels,
@@ -411,9 +411,9 @@
           stack:'AGE'
         }));
 
-        const categoryPct = Math.max(0.20, Math.min(0.9, 7 / nCols));
-        const barPct = Math.max(0.35, Math.min(0.9, 6 / nCols));
-        const maxBarThickness = Math.max(6, Math.min(14, Math.round(120 / nCols)));
+        const categoryPct = Math.max(0.6, Math.min(1.0, 18 / nCols));   // meno spazio tra gruppi
+        const barPct = Math.max(0.8, Math.min(1.0, 14 / nCols));        // barre più piene
+        const maxBarThickness = Math.max(10, Math.min(24, Math.round(300 / nCols))); // spessore massimo più alto
         datasets.forEach(ds=>{ ds.categoryPercentage=categoryPct; ds.barPercentage=barPct; ds.maxBarThickness=maxBarThickness; });
 
         return { labels, datasets };

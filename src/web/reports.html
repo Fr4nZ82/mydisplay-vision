@@ -36,7 +36,7 @@
       tbody tr:hover{ background:#0e1420 }
       .foot{ margin-top:18px; color:var(--muted); font-size:12px }
 
-      /* Chart areas sized by container to avoid growth loops */
+      /* Chart areas sized by container */
       .chart-box{ position:relative; height:320px; }
       .chart-sm{ height:180px; }
       .chart-square{ width:100%; aspect-ratio:1 / 1; max-height:150px; display:flex; align-items:center; justify-content:center; }
@@ -99,7 +99,7 @@
 
       <section class="grid">
         <div class="card">
-          <div class="sub" style="margin-bottom:8px">Serie temporale visitatori</div>
+          <div class="sub" style="margin-bottom:8px">Distribuzione traffico (radiale)</div>
           <div class="chart-box">
             <canvas id="chartTime"></canvas>
           </div>
@@ -250,43 +250,52 @@
         return entries.slice(0,8);
       }
 
+      // ====== Helper: build distribution for radial chart ======
+      function buildDistribution(ts){
+        if(ts.labels.length===24){
+          // Raggruppa per fasce orarie
+          const bands = [
+            {lbl:'Notte (00–06)', idx:[0,1,2,3,4,5,6]},
+            {lbl:'Mattina (07–11)', idx:[7,8,9,10,11]},
+            {lbl:'Pranzo (12–16)', idx:[12,13,14,15,16]},
+            {lbl:'Sera (17–23)', idx:[17,18,19,20,21,22,23]},
+          ];
+          const labels = bands.map(b=>b.lbl);
+          const values = bands.map(b=>b.idx.reduce((sum,h)=>sum+(ts.values[h]||0),0));
+          return {labels, values};
+        } else {
+          // Distribuzione per giorno
+          return {labels: ts.labels.slice(), values: ts.values.slice()};
+        }
+      }
+
       // ====== Charts ======
       let chartTime, chartGenderDaily;
       function renderCharts(ts, dailyRows){
         const ctxT = document.getElementById('chartTime');
         const ctxGD = document.getElementById('chartGenderDaily');
 
+        // --- NEW: Polar Area (distribution) replacing area-time chart ---
+        const dist = buildDistribution(ts);
+        const colors = dist.labels.map((_,i)=>{
+          const base = [125,211,252]; // accent base
+          const a = 0.25 + (i % 5) * 0.12;
+          return `rgba(${base[0]},${base[1]},${base[2]},${a})`;
+        });
         const timeCfg = {
-          type:'line',
-          data:{ labels: ts.labels, datasets:[{
-            label:'Visitatori',
-            data: ts.values,
-            fill:true,
-            tension:.35,
-            borderColor:'#7dd3fc',
-            borderWidth:2,
-            pointRadius:2,
-            pointHoverRadius:4,
-            backgroundColor:(ctx)=>{
-              const chart = ctx.chart; const {ctx: c, chartArea} = chart;
-              if(!chartArea) return 'rgba(125,211,252,0.15)';
-              const g = c.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
-              g.addColorStop(0,'rgba(125,211,252,0.35)');
-              g.addColorStop(1,'rgba(125,211,252,0.05)');
-              return g;
-            }
-          }] },
+          type:'polarArea',
+          data:{ labels: dist.labels, datasets:[{
+            label:'Distribuzione traffico',
+            data: dist.values,
+            backgroundColor: colors,
+            borderColor:'#1e2636',
+            borderWidth:1
+          }]},
           options:{
             responsive:true,
             maintainAspectRatio:false,
-            plugins:{
-              legend:{display:false},
-              tooltip:{mode:'index', intersect:false}
-            },
-            scales:{
-              x:{grid:{color:'#1e2636'}},
-              y:{grid:{color:'#1e2636'}, beginAtZero:true}
-            }
+            plugins:{ legend:{ position:'right', labels:{ usePointStyle:true } } },
+            scales:{ r:{ grid:{ color:'#1e2636' }, angleLines:{ color:'#1e2636' }, ticks:{ display:false } } }
           }
         };
 
@@ -296,12 +305,21 @@
         const dataM = dailyRows.map(r=>r.m);
         const dataU = dailyRows.map(r=>r.u);
 
+        // Spaziatura dinamica per far entrare fino a 30 colonne
+        const n = labels.length || 1;
+        const categoryPct = Math.max(0.22, Math.min(0.9, 7 / n)); // più colonne -> categorie più strette
+        const barPct = Math.max(0.35, Math.min(0.9, 6 / n));
+        const maxBarThickness = Math.max(6, Math.min(14, Math.round(120 / n)));
+
         const genderDailyCfg = {
           type:'bar',
           data:{ labels, datasets:[
-            {label:'Femminile', data:dataF, backgroundColor:'#f472b6', borderColor:'#be185d', borderWidth:1, stack:'gender'},
-            {label:'Maschile', data:dataM, backgroundColor:'#60a5fa', borderColor:'#1d4ed8', borderWidth:1, stack:'gender'},
-            {label:'Sconosciuto', data:dataU, backgroundColor:'#94a3b8', borderColor:'#475569', borderWidth:1, stack:'gender'}
+            {label:'Femminile', data:dataF, backgroundColor:'#f472b6', borderColor:'#be185d', borderWidth:0.5, stack:'gender',
+             categoryPercentage:categoryPct, barPercentage:barPct, maxBarThickness},
+            {label:'Maschile', data:dataM, backgroundColor:'#60a5fa', borderColor:'#1d4ed8', borderWidth:0.5, stack:'gender',
+             categoryPercentage:categoryPct, barPercentage:barPct, maxBarThickness},
+            {label:'Sconosciuto', data:dataU, backgroundColor:'#94a3b8', borderColor:'#475569', borderWidth:0.5, stack:'gender',
+             categoryPercentage:categoryPct, barPercentage:barPct, maxBarThickness}
           ]},
           options:{
             responsive:true,
@@ -362,7 +380,7 @@
         lines.push(`Meta,Visitatori totali (stima),${totalVisitors}`);
         lines.push('');
 
-        // Serie temporale
+        // Serie temporale (manteniamo i dati grezzi per compatibilità)
         lines.push('Sezione,Data,Ora,Visitatori (stima)');
         if(ts.labels.length===24){
           const day = (dailyRows && dailyRows[0] && dailyRows[0].date) || new Date().toISOString().slice(0,10);
@@ -432,14 +450,13 @@
           doc.addImage(img, 'PNG', margin, y, imgW, imgH, undefined, 'FAST'); y += imgH + 6;
         };
 
-        addChart(chartTime, 'Serie temporale visitatori');
+        addChart(chartTime, 'Distribuzione traffico (radiale)');
         addChart(chartGenderDaily, 'Serie per genere (giorni)');
 
         // Daily table
         if(Array.isArray(dailyRows) && dailyRows.length){
           const head = [['Data','Totale','F','M','U','Età mediana']];
           const body = dailyRows.map(r=>[r.date, r.total, r.f, r.m, r.u, r.median]);
-          // Ensure plugin is present
           if(typeof doc.autoTable === 'function'){
             doc.autoTable({ startY: y, head, body, styles:{ fontSize:9 } });
           } else {
@@ -448,7 +465,7 @@
           }
         }
 
-        const tsName = `${now.getFullYear()}${('0'+(now.getMonth()+1)).slice(-2)}${('0'+now.getDate()).slice(-2)}_${('0'+now.getHours()).slice(-2)}${('0'+now.getMinutes()).slice(-2)}${('0'+now.getSeconds()).slice(-2)}`;
+        const tsName = `${now.getFullYear()}${('0'+(now.getMonth()+1)).slice(-2)}${('0'+now.getDate()).slice(-2)}_${('0'+(now.getHours())).slice(-2)}${('0'+now.getMinutes()).slice(-2)}${('0'+now.getSeconds()).slice(-2)}`;
         doc.save(`report_mydisplay_vision_${tsName}.pdf`);
       }
 

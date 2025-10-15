@@ -310,21 +310,62 @@
       // ====== CSV Export ======
       function exportCSV(ts, dailyRows, age, gender){
         const lines = [];
-        lines.push('section,label,value');
-        ts.labels.forEach((l,i)=>lines.push(`time,${l},${ts.values[i]}`));
+        const rangeVal = (document.getElementById('range')||{}).value || '7d';
+        const rangeLbl = ({today:'Oggi',yesterday:'Ieri','7d':'Ultimi 7 giorni','30d':'Ultimi 30 giorni'})[rangeVal] || rangeVal;
+        const gran = ts.labels.length===24 ? 'Oraria' : 'Giornaliera';
+        const genAt = new Date();
+        const totalVisitors = ts.values.reduce((a,b)=>a+b,0);
+        const percent = (part,total)=> total>0 ? ((part/total)*100).toFixed(1)+'%' : '0%';
+
+        // Meta
+        lines.push('Sezione,Campo,Valore');
+        lines.push(`Meta,Generato il,${genAt.toLocaleString('it-IT')}`);
+        lines.push(`Meta,Intervallo selezionato,${rangeLbl}`);
+        lines.push(`Meta,Granularità serie temporale,${gran}`);
+        lines.push(`Meta,Visitatori totali (stima),${totalVisitors}`);
         lines.push('');
-        lines.push('daily,date,total,F,M,U,median');
-        dailyRows.forEach(r=>lines.push(`daily,${r.date},${r.total},${r.f},${r.m},${r.u},${r.median}`));
+
+        // Serie temporale
+        lines.push('Sezione,Data,Ora,Visitatori (stima)');
+        if(ts.labels.length===24){
+          const day = (dailyRows && dailyRows[0] && dailyRows[0].date) || new Date().toISOString().slice(0,10);
+          ts.labels.forEach((h,i)=>lines.push(`Serie temporale,${day},${h},${ts.values[i]}`));
+        } else {
+          ts.labels.forEach((d,i)=>lines.push(`Serie temporale,${d},,${ts.values[i]}`));
+        }
         lines.push('');
-        lines.push('gender,F,M,U');
-        lines.push(`gender,${gender.f},${gender.m},${gender.u}`);
+
+        // Riepilogo giornaliero
+        lines.push('Sezione,Data,Totale,Femminile,Maschile,Sconosciuto,Età mediana');
+        dailyRows.forEach(r=>lines.push(`Riepilogo giornaliero,${r.date},${r.total},${r.f},${r.m},${r.u},${r.median}`));
         lines.push('');
-        lines.push('age,'+age.buckets.join(','));
-        lines.push('age,'+age.counts.join(','));
+
+        // Genere complessivo
+        const gTot = gender.f + gender.m + gender.u;
+        lines.push('Sezione,Etichetta,Valore,Percentuale');
+        lines.push(`Genere complessivo,Femminile,${gender.f},${percent(gender.f,gTot)}`);
+        lines.push(`Genere complessivo,Maschile,${gender.m},${percent(gender.m,gTot)}`);
+        lines.push(`Genere complessivo,Sconosciuto,${gender.u},${percent(gender.u,gTot)}`);
+        lines.push('');
+
+        // Distribuzione età
+        const ageTot = age.counts.reduce((a,b)=>a+b,0);
+        lines.push('Sezione,Fascia età,Conteggio,Percentuale');
+        for(let i=0;i<age.buckets.length;i++){
+          lines.push(`Distribuzione età,${age.buckets[i]},${age.counts[i]},${percent(age.counts[i],ageTot)}`);
+        }
+        lines.push('');
+
+        // Top ore per traffico
+        const top = topHoursFrom(ts);
+        lines.push('Sezione,Giorno,Ora,Passaggi');
+        top.forEach(r=>lines.push(`Top ore per traffico,${r.day},${r.hour},${r.val}`));
+
         const blob = new Blob([lines.join('\n')], {type:'text/csv'});
         const a = document.createElement('a');
+        const tsName = `${genAt.getFullYear()}${('0'+(genAt.getMonth()+1)).slice(-2)}${('0'+genAt.getDate()).slice(-2)}_${('0'+genAt.getHours()).slice(-2)}${('0'+genAt.getMinutes()).slice(-2)}${('0'+genAt.getSeconds()).slice(-2)}`;
         a.href = URL.createObjectURL(blob);
-        a.download = `report_mydisplay_vision_${Date.now()}.csv`;
+        a.download = `report_mydisplay_vision_${tsName}.csv`;
         a.click();
       }
 

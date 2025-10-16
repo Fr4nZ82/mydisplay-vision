@@ -1,290 +1,125 @@
 # MyDisplay Vision – Configurazione (guida completa)
 
-Questo documento elenca e spiega tutte le proprietà utilizzabili in config.json.  
-
-- Indice
-  - [🎥 Capture / Stream](#-capture--stream)
-  - [🌐 API](#-api)
-  - [📡 RTSP (sorgenti IP)](#-rtsp-sorgenti-ip)
-  - [🧭 Tracker (ID stabili)](#-tracker-id-stabili)
-  - [🔎 Detector](#-detector)
-    - [Person detector (YOLO ONNX)](#person-detector-yolo-onnx)
-    - [Face detector (YuNet)](#face-detector-yunet)
-    - [Associazione volto→persona](#associazione-voltopersona)
-  - [🧠 Classificatore Età/Genere](#-classificatore-etàgenere)
-    - [Modello combinato (consigliato)](#modello-combinato-consigliato)
-    - [Throttle / caching classificazione](#throttle--caching-classificazione)
-  - [🚶 ROI / Tripwire](#-roi--tripwire)
-  - [🔁 Re-Identification (ReID)](#-re-identification-reid)
-    - [Obiettivi e panoramica](#obiettivi-e-panoramica)
-    - [Face ReID (SFace/ArcFace)](#face-reid-sfacearcface)
-    - [Body ReID (OSNet / Intel OMZ)](#body-reid-osnet--intel-omz)
-    - [Politiche di fusione e soglie](#politiche-di-fusione-e-soglie)
-    - [Memoria, TTL e banca di feature](#memoria-ttl-e-banca-di-feature)
-    - [Diagnostica ReID](#diagnostica-reid)
-  - [🧮 Modalità di conteggio e deduplica](#-modalità-di-conteggio-e-deduplica)
-  - [📊 Metriche / Aggregazione](#-metriche--aggregazione)
-  - [⚙️ Suggerimenti di performance](#️-suggerimenti-di-performance)
-  - [🧪 Troubleshooting](#-troubleshooting)
-
-
-## 🎥 Capture / Stream
-
-Ambito: impostazioni di acquisizione e stream di debug (dimensioni, fps, overlay).
-
-- camera (default: 0): indice webcam (USB/integrata) o stringa RTSP.
-- width (default: 1920), height (default: 1080): risoluzione richiesta (px).
-- target_fps (default: 10.0): FPS desiderati per il loop (throttle).
-- debug_enabled (default: false): abilita /debug e stream MJPEG.
-- debug_stream_fps (default: 5): FPS dello stream MJPEG.
-
-## 🌐 API
-
-Ambito: server HTTP locale per diagnostica, stream e metriche.
-
-- api_host (default: "127.0.0.1"): bind address (usa "0.0.0.0" per LAN).
-- api_port (default: 8080): porta del server.
-
-
-## 📡 RTSP (sorgenti IP)
-
-Ambito: tuning best‑effort per flussi RTSP con OpenCV/FFmpeg.
-
-- rtsp_transport (default: "tcp"): "tcp" o "udp".
-- rtsp_buffer_frames (default: 2): dimensione buffer interno (frame).
-- rtsp_open_timeout_ms (default: 4000): timeout apertura (ms).
-- rtsp_read_timeout_ms (default: 4000): timeout lettura (ms).
-- rtsp_reconnect_sec (default: 2.0): attesa prima del reopen.
-- rtsp_max_failures (default: 60): read fallite prima di riaprire.
-
-## Nota su IoU (Intersection over Union)
-IoU misura quanta parte di due bounding box A e B si sovrappone rispetto alla loro unione. Si calcola come IoU = area(A ∩ B) / area(A ∪ B) e vale tra 0 e 1 (1 = box completamente sovrapposti, 0 = nessuna sovrapposizione). Nel tracking viene usata per associare una detection a un track esistente tra frame consecutivi: soglie più alte richiedono box molto coerenti, soglie più basse tollerano spostamenti rapidi, blur o variazioni di scala.
-
-
-## Nota su NMS (Non‑Maximum Suppression)
-L’NMS serve a eliminare i duplicati quando il detector produce più bounding box per lo stesso oggetto. Conserva le box con punteggio più alto e sopprime le altre troppo sovrapposte.
-
-Come funziona (hard NMS):
-1) ordina le box per score decrescente;
-2) seleziona la migliore e aggiungila all’output;
-3) sopprimi le altre con IoU superiore alla soglia rispetto a quella appena scelta;
-4) ripeti finché non restano candidati o si raggiunge il limite massimo.
-
-Linee guida pratiche:
-- Vedi duplicati sulla stessa persona → abbassa leggermente la soglia IoU dell’NMS.
-- Persone molto vicine “collassano” in una sola box → alza la soglia IoU dell’NMS e/o riduci leggermente lo score_th per far entrare più candidate.
-- Scene molto affollate → valuta di alzare person_iou_th e person_max_det; in alternativa mantieni una soglia più alta ma aumenta gli score_th per contenere il costo in risorse.
-
-Nota: la pipeline usa NMS “hard” (soppressione netta oltre soglia). Varianti come Soft‑NMS riducono progressivamente gli score anziché sopprimere, ma non sono attive qui.
-
-
-## Nota su DNN (Deep Neural Network) e backend/target
-Per DNN si intende il motore di inferenza che esegue i modelli di rete neurale. In questa pipeline, per i blocchi basati su OpenCV DNN (YOLO persone, YuNet face, Body ReID) si configurano due campi: backend e target.
-
-- backend: seleziona il framework di esecuzione.
-  - 0 = OPENCV (default, CPU)
-  - 5 = CUDA (OpenCV DNN con CUDA – GPU NVIDIA)
-  - 2 = OpenVINO/Inference Engine (Intel)
-- target: seleziona dispositivo/precisione.
-  - 0 = CPU
-  - 6 = CUDA (FP32)
-  - 7 = CUDA_FP16 (half precision)
-  - 1 = OPENCL, 2 = OPENCL_FP16 (GPU generiche via OpenCL)
-  - 3 = MYRIAD (Intel NCS2)
-
-Combinazioni tipiche:
-- CPU: backend=0, target=0
-- GPU NVIDIA: backend=5, target=6 (FP32) oppure 7 (FP16)
-- Intel/OpenVINO: backend=2, target=0 (CPU) oppure 3 (MYRIAD)
-
-Suggerimenti:
-- FP16 (target=7 o OPENCL_FP16) aumenta il throughput riducendo l’uso di memoria, con lieve perdita di precisione; ideale su GPU.
-- Mantieni backend/target coerenti tra i blocchi più pesanti per evitare copie di memoria tra dispositivi.
-- CUDA richiede OpenCV compilato con supporto DNN CUDA e driver NVIDIA compatibili; in caso contrario usa 0/0.
-- OpenVINO richiede il runtime installato e modelli compatibili.
-- I campi backend/target non si applicano al classificatore età/genere se eseguito con ONNX Runtime (CPU per default).
-
-Diagnostica:
-- Se compaiono errori di inizializzazione o fallback a CPU, prova backend=0/target=0 e verifica versione di OpenCV, driver e build con supporto DNN desiderato.
-
-
-## 🧭 Tracker (ID stabili)
-
-Ambito: mantenere un ID coerente per persona/volto tra frame consecutivi (SORT‑lite).
-
-- tracker_max_age (default: 8): numero di frame consecutivi consentiti senza aggiornamento prima di marcare il track come perso ed eliminarlo. Valori alti aiutano con fps bassi, blur, occlusioni brevi o RTSP instabile (meno drop di ID), ma aumentano il rischio di “zombie”/agganci errati persistenti; valori bassi rendono il tracking più reattivo ma spezzano più facilmente gli ID. È espresso in frame (non in secondi): a 10 FPS, 12 ≈ 1.2 s. Linee guida: 8–16 per 8–12 FPS/RTSP; 3–6 per 20–30 FPS stabili. Aumenta se il detector è poco sensibile o la scala varia molto; riduci in scene affollate per limitare swap/merge.
-- tracker_min_hits (default: 4): numero di associazioni consecutive (hit) richieste per promuovere un track da “tentativo” a “confermato”. Prima della conferma il track non viene esposto/contato, così da filtrare detezioni spurie o lampi singoli. Valori alti riducono falsi positivi ma aumentano la latenza di comparsa e possono perdere soggetti molto brevi; valori bassi rendono il sistema più reattivo ma possono generare ID effimeri. È espresso in frame: a 10 FPS, 3 ≈ 0.2–0.3 s di latenza prima della conferma. Linee guida: 2–3 per 8–15 FPS; 1 se il detector è molto pulito e serve bassa latenza; 4–5 se il detector è rumoroso o la sorgente RTSP è instabile (burst). Regolare in coppia con tracker_max_age: con fps bassi o occlusioni brevi, riduci min_hits o aumenta max_age per facilitare la conferma.
-- tracker_iou_th (default: 0.35): soglia IoU per associare una detection a un track esistente. Valori alti richiedono più sovrapposizione (tracking più severo: meno swap di ID ma più drop con movimenti rapidi o camera instabile); valori bassi sono più tolleranti (reggono low‑fps/blur/RTSP instabile ma aumentano match errati). Range consigliato 0.30–0.50; alza con camera/fps stabili e detector preciso, abbassa con soggetti veloci o variazioni di scala marcate.
-
-
-## 🔎 Detector
-
-### Person detector (YOLO ONNX)
-
-Ambito: detection primaria delle persone. Se presente, il tracker usa queste bbox; altrimenti fallback sui volti.
-
-- person_img_size (default: 640): lato di input (px) usato per il resize “letterbox” prima dell’inferenza YOLO. Valori maggiori rilevano soggetti più piccoli e lontani ma aumentano latenza/uso di CPU/GPU e RAM (costo ~quadratico); valori minori velocizzano ma possono perdere oggetti piccoli. Deve essere multiplo di 32 (es. 320, 416, 512, 576, 640, 736, 768). Non modifica la risoluzione del frame di acquisizione; le bbox sono riportate alla dimensione originale. Linee guida: CPU/RTSP instabile 416–576; GPU 640–768; soggetti molto piccoli/scene ampie 736–768.
-- person_score_th (default: 0.26): soglia di confidenza minima per mantenere una detection YOLO (objectness × class). Più bassa = più recall (rileva anche soggetti piccoli/lontani) ma più falsi positivi e costo NMS; più alta = più precisione ma rischio di perdere volti/persona deboli o parziali. Linee guida: 0.22–0.30 su CPU/RTSP instabile; 0.30–0.40 su scene pulite/GPU. Regolare insieme a person_iou_th.
-- person_iou_th (default: 0.45): soglia IoU per NMS (sopprime box con IoU > soglia). Valori più bassi rendono l’NMS più aggressivo (meno duplicati ma possibile soppressione di persone molto vicine/overlap); valori più alti conservano più box (utile in folle/overlap, ma aumentano duplicati e costo). Range tipico 0.40–0.55; 0.45 è un buon compromesso.
-- person_max_det (default: 200): limite massimo di bbox persona restituite per frame dopo NMS. Ridurlo limita il carico su tracker/classificatore in scene affollate; aumentarlo evita “tagli” in crowd densi. Linee guida: 100–200 per retail standard; 300–500 per scene molto affollate; 50–100 su CPU deboli.
-- person_backend (default: 0): backend DNN OpenCV per l’inferenza YOLO. Valori comuni: 0=DEFAULT/OPENCV (CPU), 5=CUDA (NVIDIA), 2=OpenVINO/Inference Engine (Intel). Deve essere coerente con person_target.
-- person_target (default: 0): target di esecuzione per il backend scelto. Valori comuni: 0=CPU, 6=CUDA, 7=CUDA_FP16, 1=OPENCL, 2=OPENCL_FP16, 3=MYRIAD (NCS2). Esempi: 0/0 per CPU; 5/6 o 5/7 per GPU NVIDIA; 2/0 (CPU) o 2/3 (MYRIAD) con OpenVINO.
-
-Nota: il modello persone si carica automaticamente se presente in:
-- models/person/openvino/
-- models/person/onnx/
-
-Nota2: punti per l'ignore:
-[ [x1,y1],   [x2,y1],   [x2,y2],   [x1,y2] ]
-   ↑            ↑          ↑          ↑
-  alto-sx     alto-dx    basso-dx   basso-sx
-
-
-### Face detector (YuNet)
-
-Ambito: detection volti per età/genere e ancoraggio ReID via embedding facciale.
-
-- detector_score_th (default: 0.8)
-- detector_nms_iou (default: 0.3)
-- detector_top_k (default: 5000)
-- detector_backend (default: 0), detector_target (default: 0)
-- detector_resize_width (default: 640): resize solo per detection.
-
-Nota: il modello volto si carica automaticamente se presente in:
-- models/face/openvino/
-- models/face/onnx/
-
-Compat reverse mapping “yunet” rimosso: non sono supportati campi legacy come yunet: { onnx_path, ... } nel config.
-### Associazione volto→persona
-
-Ambito: collegare un volto alla bbox persona più plausibile per usare volto nel classifier/ReID.
-
-- face_assoc_iou_th (default: 0.20): IoU minima per associare volto→persona.
-- face_assoc_center_in (default: true): abilita un criterio complementare all’IoU per associare volto→persona. Se il punto centrale del box volto cade all’interno della bbox persona candidata, l’associazione è considerata valida anche quando l’IoU è bassa (viso molto piccolo dentro un box corpo grande).
-  - Regola primaria: associa se IoU ≥ face_assoc_iou_th.
-  - Fallback: se IoU < soglia ma il centro volto è contenuto in una o più bbox persona, scegli quella con IoU più alta; se nessuna lo contiene, non associare.
-  - Quando usarlo: tienilo attivo per robustezza a scale diverse e jitter del detector; valuta di disattivarlo in scene molto affollate o con forti occlusioni, dove più bbox persona si sovrappongono e il centro volto può cadere nel box sbagliato.
-
-
-## 🧠 Classificatore Età/Genere
-
-Ambito: stima genere/età da crop volto via modello unico (combinato).
-
-- age_buckets (default: ["0-13","14-24","25-34","35-44","45-54","55-64","65+"])
-- cls_min_face_px (default: 64)
-- cls_min_conf (default: 0.35)
-- cls_interval_ms (default: 300)
-### Modello combinato (consigliato)
-
-Ambito: un unico modello che predice età+genere. Il path non è in config: metti il file in:
-- models/genderage/openvino/
-- models/genderage/onnx/
-
-- combined_input_size (default: [62, 62] per Intel 0013; adatta se usi altri modelli).
-- combined_bgr_input (default: true): true se il modello si aspetta BGR, false per RGB.
-- combined_scale01 (default: false): se true normalizza l’input a [0..1] (alcuni modelli lo richiedono). Per Intel 0013 tenere false (usa 0..255 float).
-- combined_age_scale (default: 100.0): scala per convertire l’uscita età normalizzata in anni (Intel 0013 usa age/100 → moltiplica per 100).
-- combined_gender_order (default: ["female","male"]): ordine dei logit/probabilità in uscita, se il modello li espone in ordine diverso inverti qui.
-
-Nota: non sono supportati path modello in config (es. combined_model_path, age_model_path, gender_model_path): l’auto‑load cerca i file nelle cartelle sopra.
-
-
-### Throttle / caching classificazione
-
-- cls_interval_ms limita la frequenza di inferenza per track/ID.
-- È attiva una cache per evitare ricalcoli ravvicinati sullo stesso volto.
-
-
-## 🚶 ROI / Tripwire
-
-Ambito: conteggio direzionale di attraversamenti su linea virtuale normalizzata.
-
-- roi_tripwire (default: [[0.1,0.5],[0.9,0.5]]): punti normalizzati A→B.
-- roi_direction (default: "both"): direzione valida (both|a2b|b2a).
-- roi_band_px (default: 12): spessore banda di tolleranza (px).
-
-Funzionamento: registra un evento quando il centro del box attraversa la tripwire; l’aggregatore crea metriche per finestra temporale.
-
-
-## 🔁 Re-Identification (ReID)
-
-### Obiettivi e panoramica
-
-Ambito: riassociare la stessa persona su uscite/rientri entro TTL; ridurre duplicati e conteggi spuri.
-
-La pipeline usa embedding di volto e corpo. La policy assegna l’ID più plausibile con priorità volto > corpo.
-
-### Face ReID (SFace/ArcFace)
-
-- reid_enabled (default: true): abilita ReID volto.
-- reid_similarity_th (default: 0.365): soglia match volto (similarità coseno su embedding L2-normalizzati).
-- reid_require_face_if_available (default: true): preferisci match con ID che hanno già embedding volto.
-- reid_cache_size (default: 1000): dimensione cache ID.
-- reid_memory_ttl_sec (default: 600): TTL memoria (eviction/presence).
-- reid_bank_size (default: 10): max feature per banca/ID.
-- debug_reid_verbose (default: false): log dettagliato delle decisioni di assegnazione.
-
-### Body ReID (OSNet / Intel OMZ)
-
-- body_reid_input_w (default: 128), body_reid_input_h (default: 256): dimensione input W×H per il crop corpo.
-- body_reid_backend (default: 0), body_reid_target (default: 0): backend/target DNN per modelli ONNX (OpenCV DNN). Per modelli OpenVINO (.xml) questi campi non sono usati.
-- body_only_th (default: 0.80): soglia match basata solo su embedding corpo (cosine).
-- reid_allow_body_seed (default: true): consenti creare ID con sola feature corpo quando nessun match è affidabile.
-
-Modelli supportati/testati: OSNet (osnet_x0_25_msmt17.onnx) e Intel OMZ (person-reidentification-retail-0288.xml). Il modello viene caricato automaticamente da models/reid_body/(onnx|openvino)/.
-
-### Politiche di fusione e soglie
-
-Priorità: volto > corpo.  
-- Se face_sim ≥ reid_similarity_th → match per volto.
-- Altrimenti se body_sim ≥ body_only_th → match per corpo (con gate verso ID con volto se reid_require_face_if_available = true).
-- Nessun match → nuovo ID; se reid_allow_body_seed = true, semina banca corpo.
-
-### Memoria, TTL e banca di feature
-
-- reid_cache_size (default: 1000), reid_memory_ttl_sec (default: 600), reid_bank_size (default: 10): controllo memoria/TTL e rotazione feature per ID.
-
-### Diagnostica ReID
-
-- debug_reid_verbose (default: false): stampa decisioni (ID scelto, face/body, top‑3).
-
-
-## 🧮 Modalità di conteggio e deduplica
-
-Ambito: generazione eventi per metriche.
-
-- count_mode (default: "presence"): "presence" | "tripwire".
-  - presence: conteggio all’eviction (TTL) con genere/età prevalenti osservati.
-  - tripwire: conteggio al passaggio oltre la linea A→B/B→A.
-- presence_ttl_sec (default: 600): TTL presenza (usato in presence).
-- count_dedup_ttl_sec (default: 600): dedup per stessa persona in tripwire.
-
-
-## 📊 Metriche / Aggregazione
-
-Ambito: raccolta eventi su finestre temporali per reporting.
-
-- metrics_window_sec (default: 60): durata finestra (s).
-- metrics_retention_min (default: 120): retention dati (minuti).
-
-Output per finestra: counts per sesso (male/female/unknown) e per fascia d’età (0‑13 … 65+ / unknown), con ts ISO e windowSec.
-
-
-## ⚙️ Suggerimenti di performance
-
-- Riduci detector_resize_width (face) a 480–640 per accelerare la detection.
-- Aumenta cls_interval_ms per ridurre inferenze ripetute sullo stesso volto.
-- tracker_iou_th ~ 0.3–0.4 è un buon compromesso.
-- In ReID, aumenta body_only_th (0.82+) in contesti con abbigliamento simile.
-- Per RTSP instabile, regola rtsp_* (timeout/buffer) e valuta tcp vs udp.
-
-
-## 🧪 Troubleshooting
-
-- JSON non supporta commenti: non usare // o /* */ in config.json.
-- Età/genere sempre unknown: verifica che un modello combinato sia presente in models/genderage/(openvino|onnx)/; controlla cls_min_face_px e i parametri combined_* coerenti con il tuo modello; verifica illuminazione e dimensione dei volti.
-- Face detector non attivo: verifica la presenza di un YuNet ONNX in models/face/onnx/ (YuNet in OpenVINO non è usato in questo ramo).
-- ReID volto/corpo non attivo: verifica i modelli in models/reid_face/onnx/ e models/reid_body/(onnx|openvino)/.
-- ReID che collassa su un unico ID: alza body_only_th (es. 0.85), mantieni reid_require_face_if_available=true, calibra reid_similarity_th.
-- RTSP instabile: alza timeout/buffer, riduci person_img_size, verifica rete.
+Questo documento è la guida ufficiale per il tuning di config.json. È stato allineato ai parametri realmente supportati dal codice (vedi src/config.py) e copre ogni chiave disponibile, con default, tipo, valori ammessi e linee guida pratiche.
+
+Come leggere questo file
+- I modelli non hanno path nel config: sono caricati automaticamente se presenti in models/<categoria>/(openvino|onnx)/.
+  - models/person/(openvino|onnx)/ → detector persone (YOLO ONNX preferito)
+  - models/face/(openvino|onnx)/ → face detector (YuNet ONNX)
+  - models/genderage/(openvino|onnx)/ → classificatore combinato età+genere
+  - models/reid_face/onnx/ → face ReID (SFace/ArcFace)
+  - models/reid_body/(openvino|onnx)/ → body ReID (OSNet/OMZ)
+- JSON non supporta commenti: non inserire // o /* */ in config.json.
+- Le note concettuali (IoU/NMS/DNN) sono qui sopra e in fondo; l’elenco delle proprietà è contiguo e completo.
+
+Concetti chiave (riassunto)
+- IoU (Intersection over Union): misura la sovrapposizione tra due box, usata per tracking e NMS. IoU = area(intersezione) / area(unione), in [0..1].
+- NMS (Non‑Maximum Suppression): elimina box duplicate mantenendo le più forti e sopprimendo quelle con IoU oltre soglia.
+- DNN backend/target (OpenCV DNN): scegli motore e dispositivo di inferenza.
+  - backend: 0=OPENCV, 5=CUDA, 2=OpenVINO
+  - target: 0=CPU, 6=CUDA, 7=CUDA_FP16, 1=OPENCL, 2=OPENCL_FP16, 3=MYRIAD
+  - Tipico: CPU 0/0; NVIDIA 5/6 o 5/7; OpenVINO 2/0 (CPU) o 2/3 (MYRIAD).
+
+—
+
+Elenco proprietà config.json (contiguo)
+- camera (default: 0) tipo: int|string. Indice webcam (0,1,…) oppure URL RTSP/HTTP/FILE. Con RTSP valgono i parametri rtsp_*.
+- width (default: 1920) tipo: int. Larghezza richiesta del frame di acquisizione.
+- height (default: 1080) tipo: int. Altezza richiesta del frame di acquisizione.
+- target_fps (default: 10.0) tipo: float. Limite FPS del loop (throttle). Aumentarlo riduce latenza ma aumenta carico.
+- debug_enabled (default: false) tipo: bool. Abilita endpoint /debug e stream MJPEG con overlay.
+- debug_stream_fps (default: 5) tipo: int. FPS dello stream MJPEG di /debug.
+- api_host (default: "127.0.0.1") tipo: string. Bind address per le API; usare "0.0.0.0" per esposizione in LAN.
+- api_port (default: 8080) tipo: int. Porta HTTP del server locale.
+- rtsp_transport (default: "tcp") tipo: string. "tcp" o "udp"; tcp più affidabile, udp più reattivo ma fragile.
+- rtsp_buffer_frames (default: 2) tipo: int. Buffer interno (frame) lato demux/decoding.
+- rtsp_open_timeout_ms (default: 4000) tipo: int. Timeout apertura RTSP in millisecondi.
+- rtsp_read_timeout_ms (default: 4000) tipo: int. Timeout lettura pacchetti/frames in millisecondi.
+- rtsp_reconnect_sec (default: 2.0) tipo: float. Attesa tra tentativi di riapertura flusso.
+- rtsp_max_failures (default: 60) tipo: int. Letture fallite prima del reopen forzato.
+- log_enabled (default: true) tipo: bool. Abilita logging strutturato su file in log_dir.
+- log_dir (default: "logs") tipo: string. Cartella per i file di log.
+- log_level (default: "INFO") tipo: string. Livello: DEBUG | INFO | WARNING | ERROR.
+- log_rotate_mb (default: 10) tipo: int. Rotazione log al superamento di N MB per file.
+- log_keep (default: 5) tipo: int. Quanti file ruotati conservare per ciascun log.
+- proc_resize_width (default: 0) tipo: int. Larghezza di lavoro del frame elaborato; 0=usa frame pieno. Valori >0 riducono il carico ma peggiorano la sensibilità su oggetti piccoli.
+- count_mode (default: "presence") tipo: string. "presence" per conteggio a fine presenza; "tripwire" per conteggio su attraversamento.
+- presence_ttl_sec (default: 600) tipo: int. TTL di una presenza prima dell’eviction (solo in presence).
+- person_img_size (default: 640) tipo: int. Lato input del detector persone (letterbox). Multiplo di 32. Più alto = più recall su piccoli, ma più costo.
+- person_score_th (default: 0.30) tipo: float [0..1]. Soglia confidenza minima YOLO. Più bassa = più recall, più falsi; regolare con person_iou_th.
+- person_iou_th (default: 0.45) tipo: float [0..1]. Soglia IoU per NMS persone. Più bassa = NMS più aggressivo, meno duplicati.
+- person_max_det (default: 200) tipo: int. Numero massimo di bbox persona restituite per frame dopo NMS.
+- person_backend (default: 0) tipo: int. Backend DNN per detector persone. Vedi mappa backend sopra.
+- person_target (default: 0) tipo: int. Target dispositivo/precisione per il detector persone. Vedi mappa target sopra.
+- person_min_box_area (default: 0) tipo: int. Area minima (w*h in px) del box persona; 0 disabilita. Utile per filtrare soggetti troppo lontani.
+- person_ignore_zone (default: []) tipo: lista di poligoni. Ognuno è una lista di punti normalizzati [x,y] in [0..1] rispetto a (width,height). Le persone il cui centro cade dentro un poligono vengono ignorate. Esempio rettangolo: [[0.6,0.0],[1.0,0.0],[1.0,1.0],[0.6,1.0]].
+- face_assoc_iou_th (default: 0.25) tipo: float [0..1]. IoU minima volto↔persona per associare il volto a una bbox persona.
+- face_assoc_center_in (default: true) tipo: bool. Se true, se il centro del volto è dentro una persona candidata, l’associazione è valida anche a IoU < soglia, scegliendo quella con IoU più alta.
+- detector_score_th (default: 0.75) tipo: float [0..1]. Soglia confidenza per YuNet (volti). Valori più bassi aumentano recall ma anche falsi.
+- detector_nms_iou (default: 0.3) tipo: float [0..1]. Soglia IoU per NMS sui volti.
+- detector_top_k (default: 5000) tipo: int. Limite candidati pre‑NMS; raramente da modificare.
+- detector_backend (default: 0) tipo: int. Backend DNN per face detector. Vedi mappa backend.
+- detector_target (default: 0) tipo: int. Target per face detector. Vedi mappa target.
+- detector_resize_width (default: 800) tipo: int. Ridimensiona il frame solo per la detection volti; più basso = più veloce, meno sensibile sui volti piccoli.
+- debug_hide_ignored (default: true) tipo: bool. In /debug non mostra volti/detections ignorati da filtri.
+- debug_mark_centers (default: false) tipo: bool. Disegna un “+” sul centro dei volti in /debug (utile per associazione volto→persona).
+- debug_show_ignore_rects (default: true) tipo: bool. Mostra i poligoni/zone di ignore nell’overlay di /debug.
+- debug_reid_verbose (default: false) tipo: bool. Log verboso delle decisioni di ReID (match, candidati, motivi).
+- debug_hide_uncommitted (default: true) tipo: bool. Nasconde in overlay i track non ancora confermati/committati (niente GID/attributi).
+- debug_log_frame_out (default: false) tipo: bool. Logga ogni FRAME_OUT; molto verboso, solo per diagnostica puntuale.
+- debug_log_detect (default: true) tipo: bool. Logga gli eventi di detection.
+- debug_log_detect_zero (default: false) tipo: bool. Logga anche quando non si rileva nessuna persona/volto.
+- debug_log_health (default: true) tipo: bool. Abilita log periodici di health/throughput.
+- combined_input_size (default: [62, 62]) tipo: [int,int]. Dimensione input del modello combinato età+genere (Intel 0013).
+- combined_bgr_input (default: true) tipo: bool. True se il modello si aspetta BGR; false per RGB.
+- combined_scale01 (default: false) tipo: bool. True per normalizzare input a [0..1]; per Intel 0013 lasciare false (usa 0..255 float).
+- combined_age_scale (default: 100.0) tipo: float. Fattore per convertire l’uscita età normalizzata in anni (Intel 0013 usa age/100).
+- combined_gender_order (default: ["female","male"]) tipo: lista string. Ordine logit/probabilità di genere atteso dal modello.
+- age_buckets (default: ["0-13","14-24","25-34","35-44","45-54","55-64","65+"]) tipo: lista string. Etichette per le fasce d’età in output.
+- cls_min_face_px (default: 64) tipo: int. Lato minimo del volto (px) per avviare la classificazione età/genere.
+- cls_min_conf (default: 0.35) tipo: float [0..1]. Soglia minima di confidenza per accettare la previsione.
+- cls_interval_ms (default: 300) tipo: int. Minimo intervallo per ripetere la classificazione sullo stesso track (cache/throttle).
+- tracker_max_age (default: 8) tipo: int. Frame massimi senza aggiornamento prima di marcare un track come perso. Aumenta per fps bassi/occlusioni brevi.
+- tracker_min_hits (default: 4) tipo: int. Hit consecutivi richiesti per confermare un track; valori alti filtrano rumore ma aumentano latenza.
+- tracker_iou_th (default: 0.35) tipo: float [0..1]. Soglia IoU per l’associazione detection↔track; più alta = più severo.
+- roi_tripwire (default: [[0.1, 0.5], [0.9, 0.5]]) tipo: [[float,float],[float,float]]. Linea A→B con coordinate normalizzate.
+- roi_direction (default: "both") tipo: string. "both" | "a2b" | "b2a"; direzione considerata valida per il conteggio.
+- roi_band_px (default: 12) tipo: int. Spessore banda di tolleranza attorno alla tripwire in pixel frame.
+- reid_enabled (default: true) tipo: bool. Abilita la Re‑Identification basata su volto.
+- reid_similarity_th (default: 0.38) tipo: float. Soglia di similitudine coseno per match volto (embedding L2‑normalizzati).
+- reid_cache_size (default: 1000) tipo: int. Dimensione massima della cache ID in memoria.
+- reid_memory_ttl_sec (default: 600) tipo: int. TTL memoria degli ID per eviction/statistiche.
+- reid_bank_size (default: 10) tipo: int. Numero massimo di feature per banca/ID (rotazione FIFO).
+- reid_require_face_if_available (default: false) tipo: bool. Se true, quando un ID in memoria possiede embedding volto, preferisce/impone conferma via volto prima di accettare solo‑corpo; aiuta a evitare merge spuri ma può aumentare frammentazioni.
+- reid_min_face_px (default: 56) tipo: int. Lato minimo del crop volto per estrarre embedding ReID; sotto la soglia si evita di usare feature rumorose.
+- reid_face_body_bias (default: 0.02) tipo: float. Bias a favore del match volto nella fusione con il corpo (valori >0 privilegiano il volto in casi borderline). 0 per disabilitare.
+- reid_min_body_h_px (default: 100) tipo: int. Altezza minima (px) del box corpo per calcolare/accettare embedding di corpo.
+- body_reid_input_w (default: 128) tipo: int. Larghezza input del modello body ReID.
+- body_reid_input_h (default: 256) tipo: int. Altezza input del modello body ReID.
+- body_reid_backend (default: 0) tipo: int. Backend DNN per body ReID (solo modelli ONNX). Ignorato per OpenVINO .xml.
+- body_reid_target (default: 0) tipo: int. Target DNN per body ReID (solo ONNX). Vedi mappa target.
+- body_only_th (default: 0.65) tipo: float. Soglia di similitudine coseno per accettare un match solo‑corpo quando il volto non matcha.
+- reid_allow_body_seed (default: true) tipo: bool. Consente di creare nuovi ID “seminati” solo con feature corpo quando nessun match è affidabile.
+- body_commit_min_hits (default: 5) tipo: int. Hit minimi prima di committare un nuovo GID basato solo‑corpo; se non impostato userebbe tracker_min_hits.
+- count_dedup_ttl_sec (default: 600) tipo: int. Deduplica in modalità tripwire: evita doppi conteggi della stessa persona entro N secondi.
+- metrics_window_sec (default: 60) tipo: int. Durata finestra di aggregazione metriche (secondi).
+- metrics_retention_min (default: 120) tipo: int. Retention dei dati aggregati in memoria (minuti).
+
+—
+
+Suggerimenti di performance
+- Preferisci detector_resize_width 640–800 per compromesso velocità/accuratezza sui volti.
+- Su CPU, person_img_size 416–576; su GPU 640–768; scene ampie/soggetti piccoli 736–768.
+- Aumenta cls_interval_ms per ridurre inferenze ripetute su stessi ID.
+- tracker_iou_th 0.30–0.40 regge jitter/RTSP; alza con stream stabili.
+- In ReID, aumenta body_only_th (0.80+) in contesti con abbigliamento simile o rischio di merge.
+- Per RTSP instabile: alza rtsp_open_timeout_ms/rtsp_read_timeout_ms, incrementa rtsp_buffer_frames, valuta rtsp_transport="tcp".
+
+Troubleshooting
+- Face/age‑gender sempre unknown: verifica modello combinato in models/genderage/(openvino|onnx), luce sufficiente, cls_min_face_px coerente.
+- Face detector non attivo: metti un YuNet ONNX in models/face/onnx/.
+- ReID non effettiva: verifica modelli in models/reid_face/onnx e models/reid_body/(onnx|openvino). Regola reid_similarity_th/body_only_th.
+- Collasso ReID su un unico ID: alza body_only_th (0.80–0.85), tieni reid_require_face_if_available=true, verifica reid_min_face_px.
+- Overlay troppo affollato: usa debug_hide_uncommitted=true, debug_hide_ignored=true e riduci person_max_det.
+- Log troppo verbosi: imposta log_level="INFO" e disattiva debug_log_frame_out/debug_reid_verbose.
 

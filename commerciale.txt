@@ -1,0 +1,62 @@
+Di cosa si tratta
+
+Mydisplay‑Vision è l'add‑on di visione artificiale dell'ecosistema MyDisplay che trasforma qualsiasi schermo in uno strumento capace di “leggere” il proprio pubblico in tempo reale, in modo completamente anonimo e nel pieno rispetto della privacy. Funziona on‑device: nessuna immagine esce dal player, nessun dato sensibile viene archiviato.
+
+Valore per il tuo business
+
+Misura l'efficacia del punto vendita: quante persone passano davanti allo schermo e in che direzione (ingresso/uscita).
+Conosci il profilo del pubblico: stima fasce d'età e genere in modo anonimo, per capire chi guarda i tuoi contenuti.
+Prendi decisioni basate sui dati: metriche locali e aggregazioni temporali pronte per dashboard e reporting.
+Nessun cloud, nessun vincolo di rete: lavora offline, ideale per retail distribuito e installazioni DOOH.
+Integrazione nativa nell'ecosistema MyDisplay: dati pronti per essere raccolti e valorizzati insieme agli altri servizi.
+
+Cosa misura
+
+Conteggio persone: due modalità complementari:
+ a. Presence: conteggio delle presenze uniche osservate nello spazio in un dato intervallo.
+ b. Tripwire: conteggio direzionale su una linea virtuale (A→B/B→A), ideale per ingressi e corridoi.
+Demografia anonima: stima per fasce d'età e genere, con aggregazione per finestre temporali.
+Stabilità dei conteggi: deduplica intelligente e riassegnazione ID per evitare doppi conteggi su rientri ravvicinati.
+
+Perché sceglierlo
+
+Privacy by design: elaborazione locale, nessuna immagine o video inviati a server, niente riconoscimento identitario.
+Affidabilità su campo: tollerante a cam IP/RTSP, luce variabile e passaggi rapidi; ottimizzabile per CPU o GPU.
+Semplicità operativa: installazione rapida, pagina di debug in tempo reale, API locali per interrogare metriche e stato.
+Scalabile: dalla singola installazione a reti di player; pronto per l'aggregazione centralizzata nell'ecosistema MyDisplay.
+
+Integrazione con l'ecosistema MyDisplay
+
+Oggi: mydisplay‑Vision opera in autonomia sul player, espone API locali e aggrega metriche in tempo reale.
+In arrivo:
+mydisplay‑node: conteggio centralizzato e aggregazione dei dati provenienti da più istanze Vision.
+mydisplay‑player: integrazione per attivazione contenuti dinamici; ad esempio, alla rilevazione di una specifica fascia d'età, il player avvia automaticamente un video designato per quel target.
+app.mydisplay.it: gestione remota della configurazione (lettura/scrittura, validazione e sincronizzazione da web‑app).
+
+Casi d'uso tipici
+
+Retail e GDO: misurazione passaggi e profilo demografico per punto cassa, ingressi, corsie.
+DOOH/OOH: audience anonima per totem e vetrine digitali, confronto tra location.
+Corporate e musei: flussi visitatori, ingressi/uscite, profilazione anonima del pubblico.
+Farmacie e parafarmacie: promozioni e informativi per fasce d’età; misurazione afflusso per fascia oraria.
+Ristorazione e QSR: conteggio ingressi per turni/promo; contenuti mirati a famiglie e giovani.
+Telco ed elettronica di consumo: vetrine interattive e A/B testing di creatività per target demografico.
+Hospitality (hotel, resort): totem in lobby e corridoi; profilo audience per upsell e wayfinding.
+Palestre e centri sportivi: promo corsi/abbonamenti su target (es. under 25, senior).
+Eventi e fiere: misurazione traffico stand e confronto tra location/giorni/ore.
+Uffici pubblici e filiali bancarie: digital signage in attesa con ottimizzazione palinsesto.
+Sanità privata/cliniche: display informativi in sale d’attesa, con metriche di afflusso anonime.
+Campus e università: flussi studenti tra edifici, orari di picco e comunicazione mirata.
+
+Requisiti e installazione
+
+Player Windows 10/11 x64 o Linux x64 con Python 3.12.10.
+Webcam USB o telecamera IP (RTSP).
+Funziona su CPU; opzionalmente supporta accelerazioni hardware dove disponibili.
+Setup rapido: copia dei modelli nella cartella “models”, avvio del servizio, API locali pronte all'uso.
+
+Trasparenza e conformità
+
+Dati esclusivamente anonimi e aggregati.
+Nessuna conservazione di immagini/video.
+Parametri di funzionamento e logging strutturato per audit e diagnostica.

@@ -53,7 +53,6 @@ Requisiti e installazione
 Player Windows 10/11 x64 o Linux x64 con Python 3.12.10.
 Webcam USB o telecamera IP (RTSP).
 Funziona su CPU; opzionalmente supporta accelerazioni hardware dove disponibili.
-Setup rapido: copia dei modelli nella cartella “models”, avvio del servizio, API locali pronte all'uso.
 
 Trasparenza e conformità
 
